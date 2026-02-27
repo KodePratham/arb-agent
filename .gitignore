@@ -1,5 +1,6 @@
 # ── Python ────────────────────────────────────────────────────────
 __pycache__/
+**/__pycache__/
 *.py[cod]
 *$py.class
 *.egg-info/
@@ -10,6 +11,11 @@ build/
 venv/
 env/
 *.whl
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
 
 # ── Environment / Secrets ────────────────────────────────────────
 .env
@@ -38,10 +44,14 @@ Engine/target/
 
 # ── Node.js / Hardhat ────────────────────────────────────────────
 node_modules/
-Contracts/node_modules/
+**/node_modules/
 Contracts/artifacts/
 Contracts/cache/
 Contracts/typechain-types/
+Contracts/coverage/
+Contracts/.nyc_output/
+*.bunx
+bun.lockb
 
 # ── Data ──────────────────────────────────────────────────────────
 # Market snapshots in Data/markets/ are TRACKED (committed to Git).
