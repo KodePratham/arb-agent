@@ -1,23 +1,20 @@
-# Data/markets/
+# Data/markets
 
-This directory holds **market snapshot JSON files** produced by the ingestion scripts.
+Local snapshot directory used by the C++ matcher.
 
-## Convention
+## File patterns
 
-| File pattern | Description |
-|---|---|
-| `predictfun_YYYYMMDD_HHMMSS.json` | Snapshot from Predict.fun |
-| `probable_YYYYMMDD_HHMMSS.json` | Snapshot from Probable |
-| `*_meta.json` | Sidecar manifest (who produced it, which LLM model, market count) |
+- `predictfun_YYYYMMDD_HHMMSS.json`
+- `probable_YYYYMMDD_HHMMSS.json`
+- `*_meta.json` (ingestion metadata)
 
-## Workflow
+## Usage
 
-1. **Teammate A** (ingestion): runs `python -m Ingestion.ingest_predictfun` → JSON files appear here → commits & pushes.
-2. **Teammate B** (matching): does `git pull` → runs `Engine/build/arb-engine.exe` → engine loads all `*.json` from this directory.
+1. Run ingestion scripts to create snapshots.
+2. Run engine; it loads all non-meta JSON files from this directory into RAM.
+3. Engine deduplicates by `(platform, market_id)`.
 
-## Notes
+## Repository policy
 
-- Files are **tracked by Git** (not ignored) — this is intentional for the two-person workflow.
-- The engine loads **all** `.json` files (excluding `*_meta.json`) from this directory at startup.
-- Newer snapshots overwrite older data for the same `(platform, market_id)` composite key via deduplication.
-- Keep snapshots small and clean; delete stale ones before committing to avoid bloat.
+- This folder keeps `.gitkeep` so the path exists in a fresh clone.
+- Generated snapshots are not committed by default.

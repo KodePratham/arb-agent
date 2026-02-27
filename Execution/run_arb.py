@@ -19,8 +19,8 @@ Usage
 Environment
 ───────────
     PRIVATE_KEY            Operator wallet private key (required for --execute)
-    ARB_EXECUTOR_ADDRESS   Deployed ArbExecutor contract address
-    OPBNB_RPC              Default RPC (overridden by --rpc)
+    ARB_EXECUTOR_CONTRACT  Deployed ArbExecutor contract address
+    OPBNB_RPC_URL          Default RPC (overridden by --rpc)
 """
 
 from __future__ import annotations
@@ -148,7 +148,10 @@ def execute_on_chain(arbs: list[dict], rpc: str, chain_id: int) -> None:
         sys.exit(1)
 
     private_key = os.getenv("PRIVATE_KEY", "")
-    contract_address = os.getenv("ARB_EXECUTOR_ADDRESS", "")
+    contract_address = (
+        os.getenv("ARB_EXECUTOR_CONTRACT", "")
+        or os.getenv("ARB_EXECUTOR_ADDRESS", "")
+    )
 
     if not private_key:
         print("[!] PRIVATE_KEY not set in .env — cannot send transactions.", file=sys.stderr)
@@ -254,7 +257,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--rpc",
-        default=os.getenv("OPBNB_RPC", DEFAULT_RPC),
+        default=(
+            os.getenv("OPBNB_RPC_URL", "")
+            or os.getenv("OPBNB_RPC", "")
+            or DEFAULT_RPC
+        ),
         help=f"opBNB JSON-RPC endpoint (default: {DEFAULT_RPC})",
     )
     parser.add_argument(

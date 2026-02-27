@@ -425,7 +425,7 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default="",
         help="Override the LLM model name (e.g. llama3, mistral). "
-             "If omitted and LLM_PROVIDER=ollama, shows interactive picker.",
+             "If omitted, shows interactive Ollama model picker.",
     )
     parser.add_argument(
         "--live",

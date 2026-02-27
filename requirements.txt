@@ -5,8 +5,7 @@
 pydantic>=2.6,<3.0
 python-dateutil>=2.9
 
-# ── LLM Routing (Groq cloud + Ollama local) ──────────────────────
-groq>=0.9,<1.0
+# ── LLM (Ollama local) ────────────────────────────────────────────
 ollama>=0.4,<1.0
 
 # ── Networking / IPC ──────────────────────────────────────────────
@@ -19,8 +18,3 @@ web3>=7.0,<8.0
 
 # ── Async / Utils ────────────────────────────────────────────────
 python-dotenv>=1.0
-orjson>=3.10
-aiofiles>=24.1
-
-# ── Alerting ─────────────────────────────────────────────────────
-python-telegram-bot>=21.0,<22.0

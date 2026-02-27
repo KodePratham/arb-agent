@@ -54,10 +54,11 @@ Contracts/.nyc_output/
 bun.lockb
 
 # ── Data ──────────────────────────────────────────────────────────
-# Market snapshots in Data/markets/ are TRACKED (committed to Git).
-# This allows teammates to push ingested data for the engine to consume.
-# Old init dir is ignored if it still exists.
-Data/markets_init/*.json
+Data/markets/*.json
+!Data/markets/.gitkeep
+Data/markets/*_meta.json
+Data/beta_predictfun/
+Data/markets_init/
 
 # ── IDE / Editor ──────────────────────────────────────────────────
 .vscode/

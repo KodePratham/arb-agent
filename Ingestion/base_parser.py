@@ -1,21 +1,14 @@
 """
 Ingestion/base_parser.py
 ────────────────────────────────────────────────────────────────────
-Dynamic LLM routing factory.
+Ollama parser factory for ingestion-time ETL.
 
-Reads LLM_PROVIDER and MODEL from .env and returns the appropriate
-client.  Supports:
+Reads MODEL and OLLAMA_BASE_URL from .env. When MODEL is empty, the
+user gets an interactive picker of locally available Ollama models.
+In non-interactive mode, it falls back to "llama3".
 
-  • ollama → local Ollama     (default, requires OLLAMA_BASE_URL)
-  • groq   → Groq cloud API  (requires GROQ_API_KEY)
-
-When LLM_PROVIDER=ollama and MODEL is not set, the user is
-presented with an interactive picker that lists locally-available
-Ollama models.  In headless / CI mode (non-TTY stdin), it falls
-back to "llama3".
-
-The LLM is used ONLY for initial ETL parsing of unstructured market
-text.  It never performs live trading logic or date/time math.
+The LLM is used only for market-text extraction at ingestion time.
+It is not used in matching or execution logic.
 ────────────────────────────────────────────────────────────────────
 """
 
@@ -26,7 +19,7 @@ import logging
 import os
 import sys
 import time as _time
-from typing import Any, TypeVar, Union
+from typing import TypeVar
 
 from dotenv import load_dotenv
 from pydantic import BaseModel
@@ -40,8 +33,7 @@ T = TypeVar("T", bound=BaseModel)
 # ── Config ────────────────────────────────────────────────────────
 
 LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "ollama").lower()
-MODEL: str = os.getenv("MODEL", "")          # empty → interactive picker for Ollama
-GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
+MODEL: str = os.getenv("MODEL", "")
 OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
 # Will be set at runtime by pick_ollama_model() or CLI --model flag
@@ -131,59 +123,6 @@ def pick_ollama_model(base_url: str | None = None) -> str:
         return fallback
 
 
-# ── Groq client ──────────────────────────────────────────────────
-
-
-class _GroqParser:
-    """Wraps the Groq Python SDK for structured JSON extraction."""
-
-    def __init__(self) -> None:
-        try:
-            from groq import Groq
-        except ImportError as exc:
-            raise ImportError("pip install groq") from exc
-
-        if not GROQ_API_KEY:
-            raise RuntimeError("GROQ_API_KEY is not set in .env")
-
-        self._client = Groq(api_key=GROQ_API_KEY)
-        self._model = _active_model or "llama3-8b-8192"
-        log.info("LLM provider: Groq  |  model: %s", self._model)
-
-    def parse(
-        self,
-        system_prompt: str,
-        user_text: str,
-        response_model: type[T],
-    ) -> T:
-        """
-        Send *user_text* through the LLM with a system prompt that
-        enforces JSON output matching *response_model*.
-        """
-        schema_json = json.dumps(
-            response_model.model_json_schema(), indent=2
-        )
-        full_system = (
-            f"{system_prompt}\n\n"
-            f"You MUST respond with a single JSON object that "
-            f"strictly matches this schema:\n```json\n{schema_json}\n```\n"
-            f"No markdown fences, no extra keys."
-        )
-
-        chat = self._client.chat.completions.create(
-            model=self._model,
-            messages=[
-                {"role": "system", "content": full_system},
-                {"role": "user", "content": user_text},
-            ],
-            temperature=0.0,
-            response_format={"type": "json_object"},
-        )
-
-        raw = chat.choices[0].message.content or "{}"
-        return response_model.model_validate_json(raw)
-
-
 # ── Ollama client ────────────────────────────────────────────────
 
 
@@ -260,16 +199,12 @@ class _OllamaParser:
 
 # ── Factory ──────────────────────────────────────────────────────
 
-_ParserType = Union[_GroqParser, _OllamaParser]
-_singleton: _ParserType | None = None
+_singleton: _OllamaParser | None = None
 
 
-def get_parser() -> _ParserType:
+def get_parser() -> _OllamaParser:
     """
-    Return a singleton LLM parser routed by LLM_PROVIDER env var.
-
-    Default provider is **ollama** (local, no API key needed).
-    Set LLM_PROVIDER=groq in .env for cloud inference.
+    Return a singleton Ollama parser.
 
     Usage::
 
@@ -287,14 +222,11 @@ def get_parser() -> _ParserType:
     if _singleton is not None:
         return _singleton
 
-    if LLM_PROVIDER == "groq":
-        _singleton = _GroqParser()
-    elif LLM_PROVIDER == "ollama":
-        _singleton = _OllamaParser()
-    else:
+    if LLM_PROVIDER != "ollama":
         raise ValueError(
-            f"Unknown LLM_PROVIDER={LLM_PROVIDER!r}. Use 'ollama' or 'groq'."
+            f"Unsupported LLM_PROVIDER={LLM_PROVIDER!r}. This project now supports only 'ollama'."
         )
+    _singleton = _OllamaParser()
     return _singleton
 
 
