@@ -1,0 +1,40 @@
+[package]
+name = "arb-engine"
+version = "0.1.0"
+edition = "2021"
+description = "High-frequency arbitrage engine for BNB prediction markets"
+
+[dependencies]
+# ── Serialization ──────────────────────────────────────────────
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# ── Concurrency / Hash Map ─────────────────────────────────────
+dashmap = "6"
+crossbeam-channel = "0.5"
+tokio = { version = "1", features = ["full"] }
+
+# ── ZeroMQ IPC ─────────────────────────────────────────────────
+zeromq = "0.3"
+
+# ── Pin transitive deps to Rust-1.83-compatible versions ───────
+uuid = ">=1.0, <1.12"
+
+# ── File system / path ─────────────────────────────────────────
+glob = "0.3"
+
+# ── Error handling ─────────────────────────────────────────────
+anyhow = "1"
+thiserror = "2"
+
+# ── Logging ────────────────────────────────────────────────────
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# ── Numeric / Math ─────────────────────────────────────────────
+num-traits = "0.2"
+rust_decimal = "1"
+rust_decimal_macros = "1"
+
+# ── Environment ────────────────────────────────────────────────
+dotenvy = "0.15"

@@ -1,0 +1,16 @@
+{
+  "name": "arb-agent-contracts",
+  "version": "0.1.0",
+  "description": "ArbExecutor smart contract for opBNB prediction market arbitrage",
+  "scripts": {
+    "compile": "hardhat compile",
+    "deploy:opbnb": "hardhat run scripts/deploy.js --network opbnb",
+    "deploy:testnet": "hardhat run scripts/deploy.js --network opbnbTestnet",
+    "verify": "hardhat verify --network opbnb"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+    "dotenv": "^16.3.1",
+    "hardhat": "^2.19.0"
+  }
+}
