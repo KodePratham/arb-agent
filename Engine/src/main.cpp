@@ -6,12 +6,16 @@
 // Uses Win32 CreateThread + Sleep instead of std::thread.
 // Uses Win32 FindFirstFile instead of std::filesystem.
 // Uses volatile bool instead of std::atomic<bool>.
+//
+// Data path:  ../Data/markets   (JSON committed by ingestion teammate)
+// Output:     arbs.json         (consumed by Execution/run_arb.py)
 // ─────────────────────────────────────────────────────────────────
 
 #include "types.hpp"
 #include "matcher.hpp"
 
 #include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -32,15 +36,18 @@
 
 // ── Constants ────────────────────────────────────────────────────
 
-static const char* MARKETS_INIT_DIR = "..\\Data\\markets_init";
+static const char* MARKETS_DIR      = "..\\Data\\markets";
 static const char* ZMQ_BIND_ADDR    = "tcp://0.0.0.0:5555";
 static const int   SCAN_INTERVAL_MS = 1000;
+
+// Default output path (overrideable via --output)
+static std::string g_output_path = "arbs.json";
 
 // ── Global state ─────────────────────────────────────────────────
 
 static volatile bool g_running = true;
 
-// ── Cross-platform sleep ─────────────────────────────────────────
+// ── Cross-platform helpers ────────────────────────────────────────
 
 static void sleep_ms(int ms) {
 #ifdef _WIN32
@@ -48,6 +55,11 @@ static void sleep_ms(int ms) {
 #else
     usleep(ms * 1000);
 #endif
+}
+
+static bool ends_with(const std::string& s, const std::string& suffix) {
+    if (suffix.size() > s.size()) return false;
+    return s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
 }
 
 // ── Directory listing (Win32 / POSIX) ────────────────────────────
@@ -62,7 +74,10 @@ static std::vector<std::string> list_json_files(const std::string& dir) {
     if (hFind == INVALID_HANDLE_VALUE) return files;
     do {
         if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
-            files.push_back(dir + "\\" + fd.cFileName);
+            std::string name(fd.cFileName);
+            // Skip sidecar manifest files (*_meta.json)
+            if (ends_with(name, "_meta.json")) continue;
+            files.push_back(dir + "\\" + name);
         }
     } while (FindNextFileA(hFind, &fd));
     FindClose(hFind);
@@ -72,7 +87,7 @@ static std::vector<std::string> list_json_files(const std::string& dir) {
     struct dirent* entry;
     while ((entry = readdir(d)) != NULL) {
         std::string name(entry->d_name);
-        if (name.size() >= 5 && name.substr(name.size() - 5) == ".json") {
+        if (ends_with(name, ".json") && !ends_with(name, "_meta.json")) {
             files.push_back(dir + "/" + name);
         }
     }
@@ -85,10 +100,10 @@ static std::vector<std::string> list_json_files(const std::string& dir) {
 // ── Bootstrap: load + deduplicate JSON files ─────────────────────
 
 static size_t load_initial_markets(arb::SharedState& state) {
-    std::vector<std::string> json_files = list_json_files(MARKETS_INIT_DIR);
+    std::vector<std::string> json_files = list_json_files(MARKETS_DIR);
 
     if (json_files.empty()) {
-        spdlog::warn("No JSON files found in {}", MARKETS_INIT_DIR);
+        spdlog::warn("No JSON files found in {}", MARKETS_DIR);
         return 0;
     }
 
@@ -133,6 +148,12 @@ static size_t load_initial_markets(arb::SharedState& state) {
                 spdlog::error("Failed to deserialize market: {}", ex.what());
             }
         }
+    }
+
+    // Build bucket index for fast matching
+    {
+        arb::LockGuard lock(state.mtx);
+        arb::rebuild_index(state);
     }
 
     spdlog::info("Loaded {} market records ({} deduped overwrites). "
@@ -208,6 +229,38 @@ static void* zmq_subscriber_thread_fn(void* arg)
 #endif
 }
 
+// ── Write arbs to JSON output ────────────────────────────────────
+
+static void write_arbs_json(const std::vector<arb::ArbOpportunity>& opps) {
+    if (g_output_path.empty()) return;
+
+    nlohmann::json jarr = nlohmann::json::array();
+    for (size_t i = 0; i < opps.size(); ++i) {
+        const arb::ArbOpportunity& o = opps[i];
+        nlohmann::json jo;
+        jo["market_a_platform"]     = arb::platform_to_string(o.market_a_platform);
+        jo["market_a_id"]           = o.market_a_id;
+        jo["market_a_yes_price"]    = o.market_a_yes_price;
+        jo["market_b_platform"]     = arb::platform_to_string(o.market_b_platform);
+        jo["market_b_id"]           = o.market_b_id;
+        jo["market_b_yes_price"]    = o.market_b_yes_price;
+        jo["net_delta_bps"]         = o.net_delta_bps;
+        jo["estimated_gas_bnb"]     = o.estimated_gas_bnb;
+        jo["slippage_bps"]          = o.slippage_bps;
+        jo["is_profitable"]         = o.is_profitable;
+        jo["recommended_size_usdt"] = o.recommended_size_usdt;
+        jarr.push_back(jo);
+    }
+
+    std::ofstream ofs(g_output_path);
+    if (!ofs) {
+        spdlog::error("Failed to open output file: {}", g_output_path);
+        return;
+    }
+    ofs << jarr.dump(2) << std::endl;
+    spdlog::info("Wrote {} arb opportunities to {}", opps.size(), g_output_path);
+}
+
 // ── Matcher scan loop thread ─────────────────────────────────────
 
 #ifdef _WIN32
@@ -225,6 +278,7 @@ static void* matcher_loop_thread_fn(void* arg)
 
         if (!opportunities.empty()) {
             spdlog::info("Found {} arbitrage opportunities", opportunities.size());
+            write_arbs_json(opportunities);
         }
 
         for (size_t i = 0; i < opportunities.size(); ++i) {
@@ -245,7 +299,15 @@ static void* matcher_loop_thread_fn(void* arg)
 
 // ── Main ─────────────────────────────────────────────────────────
 
-int main() {
+int main(int argc, char* argv[]) {
+    // ── CLI args ─────────────────────────────────────────────────
+    for (int i = 1; i < argc; ++i) {
+        if ((std::strcmp(argv[i], "--output") == 0 || std::strcmp(argv[i], "-o") == 0)
+            && i + 1 < argc) {
+            g_output_path = argv[++i];
+        }
+    }
+
     // ── Logging ──────────────────────────────────────────────────
     spdlog::set_level(spdlog::level::info);
     spdlog::set_pattern("%Y-%m-%d %H:%M:%S.%e  [%l]  %v");
@@ -253,6 +315,8 @@ int main() {
     spdlog::info("======================================================");
     spdlog::info("  Arb-Engine (C++)  --  BNB / opBNB Prediction-Market Arb");
     spdlog::info("======================================================");
+    spdlog::info("Data dir:    {}", MARKETS_DIR);
+    spdlog::info("Output file: {}", g_output_path);
 
     // ── Shared state ─────────────────────────────────────────────
     arb::SharedState state;

@@ -2,6 +2,10 @@
 // ─────────────────────────────────────────────────────────────────
 // The Math Engine — implementation.
 // C++14 / GCC 6.3 / MinGW win32-threads compatible.
+//
+// Market Index:  Similar markets are bucketed by
+//   (underlying_asset, oracle, expiration_bucket)
+// so scan_for_arbs() only cross-compares within each bucket.
 // ─────────────────────────────────────────────────────────────────
 
 #include "matcher.hpp"
@@ -20,6 +24,7 @@ namespace arb {
 static const double    BASE_GAS_PRICE_GWEI  = 3.0;
 static const uint64_t  GAS_UNITS_PER_TRADE  = 250000;
 static const double    BNB_PRICE_USD        = 600.0;
+static const int64_t   EXPIRATION_BUCKET_SEC = 120;  // 2-minute windows
 
 // ── Helpers ──────────────────────────────────────────────────────
 
@@ -135,80 +140,137 @@ double net_delta_bps(
     return gross - total_fees - gas_cost_bps - total_slippage;
 }
 
-// ── Core scan ────────────────────────────────────────────────────
+// ── Market Index functions ───────────────────────────────────────
+
+BucketKey make_bucket_key(const NormalizedMarket& m) {
+    std::string upper = to_upper(m.underlying_asset);
+    int oracle_int = static_cast<int>(m.resolution_oracle);
+    int64_t exp_bucket = (m.expiration_unix > 0)
+        ? (m.expiration_unix / EXPIRATION_BUCKET_SEC)
+        : 0;
+    return BucketKey(upper, oracle_int, exp_bucket);
+}
+
+void rebuild_index(SharedState& state) {
+    // Note: caller must hold state.mtx
+    state.index.clear();
+    for (StateMap::const_iterator it = state.map.begin(); it != state.map.end(); ++it) {
+        const NormalizedMarket& m = it->second;
+        if (m.underlying_asset.empty()) continue;  // can't index without underlying
+
+        BucketKey bk = make_bucket_key(m);
+        state.index[bk].push_back(it->first);
+    }
+    spdlog::info("MarketIndex rebuilt: {} buckets from {} markets",
+                 state.index.size(), state.map.size());
+}
+
+void index_insert(SharedState& state, const CompositeKey& ck, const NormalizedMarket& m) {
+    // Note: caller must hold state.mtx
+    if (m.underlying_asset.empty()) return;
+
+    BucketKey bk = make_bucket_key(m);
+    std::vector<CompositeKey>& bucket = state.index[bk];
+
+    // Avoid duplicate entries in the bucket
+    for (size_t i = 0; i < bucket.size(); ++i) {
+        if (bucket[i] == ck) return;
+    }
+    bucket.push_back(ck);
+}
+
+// ── Core scan (bucket-based) ─────────────────────────────────────
 
 std::vector<ArbOpportunity> scan_for_arbs(SharedState& state, const MatcherConfig& cfg) {
     std::vector<ArbOpportunity> opportunities;
 
-    // Snapshot under lock
-    std::vector<NormalizedMarket> pf_markets, pr_markets;
+    // Snapshot buckets and market data under lock
+    MarketIndex index_snapshot;
+    StateMap    map_snapshot;
     {
         LockGuard lock(state.mtx);
-        for (StateMap::const_iterator it = state.map.begin(); it != state.map.end(); ++it) {
-            const NormalizedMarket& m = it->second;
-            if (m.platform == PLATFORM_PREDICTFUN) pf_markets.push_back(m);
-            else if (m.platform == PLATFORM_PROBABLE) pr_markets.push_back(m);
+        index_snapshot = state.index;
+        map_snapshot   = state.map;
+    }
+
+    size_t buckets_checked = 0;
+    size_t pairs_checked   = 0;
+
+    for (MarketIndex::const_iterator bit = index_snapshot.begin();
+         bit != index_snapshot.end(); ++bit) {
+
+        const std::vector<CompositeKey>& bucket = bit->second;
+        if (bucket.size() < 2) continue;  // need at least 2 markets to compare
+        ++buckets_checked;
+
+        // Cross-compare all pairs within this bucket
+        for (size_t i = 0; i < bucket.size(); ++i) {
+            StateMap::const_iterator it_a = map_snapshot.find(bucket[i]);
+            if (it_a == map_snapshot.end()) continue;
+            const NormalizedMarket& a = it_a->second;
+
+            for (size_t j = i + 1; j < bucket.size(); ++j) {
+                StateMap::const_iterator it_b = map_snapshot.find(bucket[j]);
+                if (it_b == map_snapshot.end()) continue;
+                const NormalizedMarket& b = it_b->second;
+
+                ++pairs_checked;
+
+                // Final equivalence guard (bucket is an approximate filter)
+                if (!markets_are_equivalent(a, b)) continue;
+
+                const NormalizedMarket* cheap     = (a.yes_price < b.yes_price) ? &a : &b;
+                const NormalizedMarket* expensive = (a.yes_price < b.yes_price) ? &b : &a;
+
+                double gas_usd = estimate_gas_cost_usd(cfg.gas_multiplier);
+                double gas_bps = (cfg.max_trade_usdt > 0.0)
+                                 ? (gas_usd / cfg.max_trade_usdt) * 10000.0
+                                 : 0.0;
+
+                double slip_a = cheap->order_book.has_value()
+                    ? estimate_slippage_bps(cheap->order_book.value(), cfg.max_trade_usdt, true)
+                    : 0.0;
+                double slip_b = expensive->order_book.has_value()
+                    ? estimate_slippage_bps(expensive->order_book.value(), cfg.max_trade_usdt, false)
+                    : 0.0;
+
+                double delta = net_delta_bps(
+                    cheap->yes_price, expensive->yes_price,
+                    cheap->fee_rate_bps, expensive->fee_rate_bps,
+                    gas_bps, slip_a, slip_b
+                );
+
+                bool profitable = delta >= cfg.min_delta_bps;
+
+                if (delta > 0.0) {
+                    spdlog::info("ARB {} | {}/{} vs {}/{} | net d={:.1f} bps | profitable={}",
+                        cheap->underlying_asset,
+                        platform_to_string(cheap->platform), cheap->market_id,
+                        platform_to_string(expensive->platform), expensive->market_id,
+                        delta, profitable);
+                }
+
+                if (profitable) {
+                    ArbOpportunity opp;
+                    opp.market_a_platform     = cheap->platform;
+                    opp.market_a_id           = cheap->market_id;
+                    opp.market_a_yes_price    = cheap->yes_price;
+                    opp.market_b_platform     = expensive->platform;
+                    opp.market_b_id           = expensive->market_id;
+                    opp.market_b_yes_price    = expensive->yes_price;
+                    opp.net_delta_bps         = delta;
+                    opp.estimated_gas_bnb     = estimate_gas_cost_bnb(cfg.gas_multiplier);
+                    opp.slippage_bps          = slip_a + slip_b;
+                    opp.is_profitable         = true;
+                    opp.recommended_size_usdt = cfg.max_trade_usdt;
+                    opportunities.push_back(opp);
+                }
+            }
         }
     }
 
-    spdlog::info("Scanning: {} Predict.fun x {} Probable markets",
-                 pf_markets.size(), pr_markets.size());
-
-    for (size_t i = 0; i < pf_markets.size(); ++i) {
-        for (size_t j = 0; j < pr_markets.size(); ++j) {
-            const NormalizedMarket& pf = pf_markets[i];
-            const NormalizedMarket& pr = pr_markets[j];
-
-            if (!markets_are_equivalent(pf, pr)) continue;
-
-            const NormalizedMarket* cheap     = (pf.yes_price < pr.yes_price) ? &pf : &pr;
-            const NormalizedMarket* expensive = (pf.yes_price < pr.yes_price) ? &pr : &pf;
-
-            double gas_usd = estimate_gas_cost_usd(cfg.gas_multiplier);
-            double gas_bps = (cfg.max_trade_usdt > 0.0)
-                             ? (gas_usd / cfg.max_trade_usdt) * 10000.0
-                             : 0.0;
-
-            double slip_a = cheap->order_book.has_value()
-                ? estimate_slippage_bps(cheap->order_book.value(), cfg.max_trade_usdt, true)
-                : 0.0;
-            double slip_b = expensive->order_book.has_value()
-                ? estimate_slippage_bps(expensive->order_book.value(), cfg.max_trade_usdt, false)
-                : 0.0;
-
-            double delta = net_delta_bps(
-                cheap->yes_price, expensive->yes_price,
-                cheap->fee_rate_bps, expensive->fee_rate_bps,
-                gas_bps, slip_a, slip_b
-            );
-
-            bool profitable = delta >= cfg.min_delta_bps;
-
-            if (delta > 0.0) {
-                spdlog::info("ARB {} | {}/{} vs {}/{} | net d={:.1f} bps | profitable={}",
-                    cheap->underlying_asset,
-                    platform_to_string(cheap->platform), cheap->market_id,
-                    platform_to_string(expensive->platform), expensive->market_id,
-                    delta, profitable);
-            }
-
-            if (profitable) {
-                ArbOpportunity opp;
-                opp.market_a_platform     = cheap->platform;
-                opp.market_a_id           = cheap->market_id;
-                opp.market_a_yes_price    = cheap->yes_price;
-                opp.market_b_platform     = expensive->platform;
-                opp.market_b_id           = expensive->market_id;
-                opp.market_b_yes_price    = expensive->yes_price;
-                opp.net_delta_bps         = delta;
-                opp.estimated_gas_bnb     = estimate_gas_cost_bnb(cfg.gas_multiplier);
-                opp.slippage_bps          = slip_a + slip_b;
-                opp.is_profitable         = true;
-                opp.recommended_size_usdt = cfg.max_trade_usdt;
-                opportunities.push_back(opp);
-            }
-        }
-    }
+    spdlog::info("Scan: {} buckets, {} pairs checked, {} arbs found",
+                 buckets_checked, pairs_checked, opportunities.size());
 
     return opportunities;
 }
@@ -246,11 +308,9 @@ void execute_arb_trade(const ArbOpportunity& opp) {
         opp.net_delta_bps, opp.recommended_size_usdt
     );
 
-    // TODO: Call ArbExecutor smart contract on opBNB via web3:
-    //   1. Build + sign TX for Buy YES on cheap platform
-    //   2. Build + sign TX for Buy NO on expensive platform
-    //   3. Submit both atomically via ArbExecutor.executeArb()
-    spdlog::warn("Trade execution is stubbed -- integrate opBNB ArbExecutor contract");
+    // Execution is handled off-engine by Execution/run_arb.py
+    // which reads arbs.json and calls the ArbExecutor contract.
+    spdlog::info("Arb written to output file → use 'python -m Execution.run_arb' to execute");
 }
 
 } // namespace arb

@@ -125,7 +125,7 @@ class NormalizedMarket(BaseModel):
     Platform-agnostic market representation.
 
     This is the canonical shape that every ingestion node must produce.
-    The Rust engine deserializes these from JSON files in Data/markets_init/.
+    The C++ engine deserializes these from JSON files in Data/markets/.
     """
 
     # ── Identity ──────────────────────────────────────────────────
@@ -237,8 +237,8 @@ class NormalizedMarket(BaseModel):
 class OddsUpdate(BaseModel):
     """
     Lightweight message published over ZMQ by each ingestion node
-    whenever odds change.  The Rust engine subscribes and applies
-    the update to its DashMap.
+    whenever odds change.  The engine subscribes and applies
+    the update to its in-memory state.
     """
     platform: Platform
     market_id: str
@@ -246,3 +246,28 @@ class OddsUpdate(BaseModel):
     no_price: float
     order_book: Optional[OrderBook] = None
     timestamp_ms: int = 0
+
+
+# ── Snapshot Manifest (sidecar metadata for Git-committed data) ───
+
+
+class SnapshotManifest(BaseModel):
+    """
+    Written alongside each market snapshot JSON so consumers know
+    who produced the data, when, and with which LLM model.
+    """
+    created_by: str = Field(
+        ..., description="Identifier of the ingestion node (e.g. ingest_predictfun:a1b2c3d4)"
+    )
+    created_at: str = Field(
+        ..., description="ISO-8601 timestamp of snapshot creation"
+    )
+    model_used: str = Field(
+        "", description="LLM model used for text extraction (e.g. llama3, mistral)"
+    )
+    platform: str = Field(
+        ..., description="Platform the data came from (PREDICTFUN or PROBABLE)"
+    )
+    market_count: int = Field(
+        0, description="Number of markets in the companion JSON file"
+    )

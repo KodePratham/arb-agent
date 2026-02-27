@@ -19,6 +19,7 @@
 
 #include <unordered_map>
 #include <vector>
+#include <string>
 
 namespace arb {
 
@@ -83,10 +84,57 @@ private:
 
 typedef std::unordered_map<CompositeKey, NormalizedMarket, CompositeKeyHash> StateMap;
 
+// ── Market Index — bucket similar markets for fast matching ──────
+//
+// BucketKey = hash of (lowercase(underlying_asset), oracle, expiration_bucket)
+// where expiration_bucket = expiration_unix / 120  (2-minute windows).
+//
+// Only markets within the same bucket are cross-compared, reducing
+// complexity from O(N×M) to O(B × k²) where k ≈ 2 per bucket.
+
+struct BucketKey {
+    std::string underlying_upper;   // uppercased underlying_asset
+    int         oracle;             // ResolutionOracle as int
+    int64_t     exp_bucket;         // expiration_unix / 120
+
+    BucketKey() : oracle(0), exp_bucket(0) {}
+    BucketKey(const std::string& u, int o, int64_t e)
+        : underlying_upper(u), oracle(o), exp_bucket(e) {}
+
+    bool operator==(const BucketKey& o2) const {
+        return underlying_upper == o2.underlying_upper
+            && oracle == o2.oracle
+            && exp_bucket == o2.exp_bucket;
+    }
+};
+
+struct BucketKeyHash {
+    size_t operator()(const BucketKey& k) const {
+        size_t h1 = std::hash<std::string>()(k.underlying_upper);
+        size_t h2 = std::hash<int>()(k.oracle);
+        size_t h3 = std::hash<int64_t>()(k.exp_bucket);
+        return h1 ^ (h2 << 1) ^ (h3 << 2);
+    }
+};
+
+typedef std::unordered_map<BucketKey, std::vector<CompositeKey>, BucketKeyHash> MarketIndex;
+
 struct SharedState {
     mutable Mutex mtx;
     StateMap      map;
+    MarketIndex   index;
 };
+
+// ── Index helpers ────────────────────────────────────────────────
+
+/// Compute the bucket key for a given market.
+BucketKey make_bucket_key(const NormalizedMarket& m);
+
+/// Rebuild the entire index from the current state map (call after bulk load).
+void rebuild_index(SharedState& state);
+
+/// Insert/update a single market in the index.
+void index_insert(SharedState& state, const CompositeKey& ck, const NormalizedMarket& m);
 
 // ── Runtime config ───────────────────────────────────────────────
 

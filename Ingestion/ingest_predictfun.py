@@ -7,17 +7,20 @@ their own machine.
 Workflow:
   1. Fetch all OPEN markets from the Predict.fun REST API.
   2. Normalise each market through the LLM-based ETL parser.
-  3. Persist snapshots as JSON in Data/markets_init/.
-  4. Open an asyncio WebSocket listener that publishes live odds
-     updates to the Rust engine over ZMQ PUB.
+  3. Persist snapshots as JSON in Data/markets/.
+  4. (Optional, --live) Open an asyncio listener that publishes
+     live odds updates to the Engine over ZMQ PUB.
 
 Run:
     python -m Ingestion.ingest_predictfun
+    python -m Ingestion.ingest_predictfun --model llama3
+    python -m Ingestion.ingest_predictfun --live
 ────────────────────────────────────────────────────────────────────
 """
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import json
 import logging
@@ -25,11 +28,10 @@ import os
 import sys
 import time
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
-import zmq
-import zmq.asyncio
 from dotenv import load_dotenv
 
 # ── Ensure the project root is on sys.path ───────────────────────
@@ -49,9 +51,10 @@ from Data.schemas import (
     Platform,
     ResolutionOracle,
     ResolutionStyle,
+    SnapshotManifest,
     TradingStatus,
 )
-from Ingestion.base_parser import parse_market_text
+from Ingestion.base_parser import parse_market_text, set_model
 
 load_dotenv()
 
@@ -67,7 +70,7 @@ API_BASE: str = os.getenv("PREDICTFUN_API_BASE", "https://api.predict.fun")
 API_KEY: str = os.getenv("PREDICTFUN_API_KEY", "")
 WS_URL: str = os.getenv("PREDICTFUN_WS_URL", "wss://ws.predict.fun")
 ZMQ_ADDR: str = os.getenv("ZMQ_ENGINE_ADDR", "tcp://0.0.0.0:5555")
-DATA_DIR: Path = ROOT / "Data" / "markets_init"
+DATA_DIR: Path = ROOT / "Data" / "markets"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 NODE_ID: str = uuid.uuid4().hex[:8]  # unique per teammate instance
@@ -145,17 +148,34 @@ def _infer_oracle(market: dict) -> ResolutionOracle:
 def _extract_underlying(market: dict) -> tuple[str, float | None]:
     """
     Try to pull the underlying asset ticker and strike from variant
-    data, falling back to an LLM parse of the question text.
+    data, falling back to simple heuristics and then LLM only
+    as a last resort.
     """
     vd = market.get("variantData")
     if vd and vd.get("type") == "CRYPTO_UP_DOWN":
-        # Use the priceFeedId to guess the ticker
         feed = vd.get("priceFeedId", "")
         ticker = feed.split("/")[0].upper() if "/" in feed else ""
         start = vd.get("startPrice")
         return ticker, start
 
-    # Fallback: try structured LLM extraction
+    # ── Heuristic: scan question for common crypto tickers ────────
+    question = (market.get("question", "") + " " + market.get("title", "")).upper()
+    _KNOWN_ASSETS = [
+        "BTC", "ETH", "BNB", "SOL", "XRP", "DOGE", "ADA",
+        "AVAX", "DOT", "MATIC", "LINK", "UNI", "SHIB", "ARB",
+        "OP", "APT", "SUI", "TIA", "SEI", "INJ", "PEPE",
+        "BITCOIN", "ETHEREUM", "SOLANA", "DOGECOIN", "RIPPLE",
+    ]
+    _TICKER_MAP = {
+        "BITCOIN": "BTC", "ETHEREUM": "ETH", "SOLANA": "SOL",
+        "DOGECOIN": "DOGE", "RIPPLE": "XRP",
+    }
+    for asset in _KNOWN_ASSETS:
+        if asset in question:
+            ticker = _TICKER_MAP.get(asset, asset)
+            return ticker, None
+
+    # ── LLM fallback (may fail — that's OK, we degrade gracefully) ─
     from pydantic import BaseModel as _BM
 
     class _Extracted(_BM):
@@ -168,7 +188,11 @@ def _extract_underlying(market: dict) -> tuple[str, float | None]:
             response_model=_Extracted,
         )
         return parsed.underlying_asset, parsed.strike_value
-    except Exception:
+    except Exception as exc:
+        log.warning(
+            "LLM extraction failed for market %s — using empty underlying. Error: %s",
+            market.get("id", "?"), exc,
+        )
         return "", None
 
 
@@ -232,20 +256,56 @@ def normalise_market(raw: dict) -> NormalizedMarket:
     )
 
 
-# ── Persist to Data/markets_init/ ─────────────────────────────────
+# ── Persist to Data/markets/ ───────────────────────────────────────
 
 
-def persist_markets(markets: list[NormalizedMarket]) -> Path:
-    """Write all normalised markets to a single JSON file."""
-    filename = f"predictfun_{NODE_ID}.json"
+def persist_markets(markets: list[NormalizedMarket], model_used: str = "") -> Path:
+    """Write all normalised markets to a timestamped JSON file."""
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    filename = f"predictfun_{ts}.json"
     filepath = DATA_DIR / filename
     payload = [m.model_dump(mode="json") for m in markets]
     filepath.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    log.info("Persisted %d markets → %s", len(payload), filepath)
+
+    # Write sidecar manifest
+    manifest = SnapshotManifest(
+        created_by=f"ingest_predictfun:{NODE_ID}",
+        created_at=datetime.now(timezone.utc).isoformat(),
+        model_used=model_used,
+        platform="PREDICTFUN",
+        market_count=len(markets),
+    )
+    meta_path = DATA_DIR / f"predictfun_{ts}_meta.json"
+    meta_path.write_text(manifest.model_dump_json(indent=2), encoding="utf-8")
+
+    # ── Print clear storage summary ───────────────────────────────
+    abs_data = filepath.resolve()
+    abs_meta = meta_path.resolve()
+    print("\n" + "═" * 64)
+    print("  DATA STORAGE SUMMARY")
+    print("═" * 64)
+    print(f"  Markets file : {abs_data}")
+    print(f"  Manifest file: {abs_meta}")
+    print(f"  Directory    : {DATA_DIR.resolve()}")
+    print(f"  Market count : {len(markets)}")
+    print(f"  Model used   : {model_used or '(none)'}")
+    print("─" * 64)
+    # Show first few markets with human-readable title + ID
+    preview_count = min(5, len(markets))
+    for i, m in enumerate(markets[:preview_count], 1):
+        title = (m.title or m.question or "(no title)")[:50]
+        print(f"  {i:>3}. [{m.platform.value}] id={m.market_id}  \"{title}\"")
+    if len(markets) > preview_count:
+        print(f"  ... and {len(markets) - preview_count} more")
+    print("═" * 64 + "\n")
+
+    log.info("Persisted %d markets → %s", len(payload), abs_data)
+    log.info("Manifest → %s", abs_meta)
+
     return filepath
 
 
-# ── ZMQ live odds publisher ───────────────────────────────────────
+# ── ZMQ live odds publisher (opt-in via --live) ───────────────────
 
 
 async def live_odds_publisher(markets: list[NormalizedMarket]) -> None:
@@ -253,9 +313,12 @@ async def live_odds_publisher(markets: list[NormalizedMarket]) -> None:
     Long-running coroutine that:
       1. Polls the Predict.fun REST API for order-book updates
          (until a true WebSocket feed is available).
-      2. Publishes OddsUpdate messages over ZMQ PUB so the Rust
+      2. Publishes OddsUpdate messages over ZMQ PUB so the
          engine receives them in real-time.
     """
+    import zmq
+    import zmq.asyncio
+
     ctx = zmq.asyncio.Context()
     pub = ctx.socket(zmq.PUB)
 
@@ -312,10 +375,39 @@ async def live_odds_publisher(markets: list[NormalizedMarket]) -> None:
         await asyncio.sleep(2.0)
 
 
+# ── CLI ───────────────────────────────────────────────────────────
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Predict.fun market ingestion node",
+    )
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="",
+        help="Override the LLM model name (e.g. llama3, mistral). "
+             "If omitted and LLM_PROVIDER=ollama, shows interactive picker.",
+    )
+    parser.add_argument(
+        "--live",
+        action="store_true",
+        default=False,
+        help="After ingestion, keep running and publish live odds over ZMQ.",
+    )
+    return parser.parse_args()
+
+
 # ── Main ──────────────────────────────────────────────────────────
 
 
 async def main() -> None:
+    args = parse_args()
+
+    # Apply --model override before parser initializes
+    if args.model:
+        set_model(args.model)
+
     log.info("═══  Predict.fun Ingestion Node [%s]  ═══", NODE_ID)
 
     # Step 1 — Fetch
@@ -334,10 +426,17 @@ async def main() -> None:
     log.info("Normalised %d / %d markets", len(normalised), len(raw_markets))
 
     # Step 3 — Persist
-    persist_markets(normalised)
+    from Ingestion.base_parser import get_active_model
+    persist_markets(normalised, model_used=get_active_model())
 
-    # Step 4 — Live odds loop
-    await live_odds_publisher(normalised)
+    log.info("✓ Ingestion complete. JSON files written to Data/markets/")
+
+    # Step 4 — (optional) Live odds loop
+    if args.live:
+        log.info("--live mode: starting ZMQ odds publisher…")
+        await live_odds_publisher(normalised)
+    else:
+        log.info("Exiting. Use --live to start the ZMQ odds publisher.")
 
 
 if __name__ == "__main__":
