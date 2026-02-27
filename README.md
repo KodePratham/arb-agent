@@ -1,89 +1,87 @@
 # arb-agent
 
-Prediction-market arbitrage pipeline for Predict.fun and Probable.
+Fast, modular arbitrage stack for prediction markets across platforms like Predict.fun and Probable.
 
-The current production path is intentionally focused and simple:
+## Why this project exists
 
-1. Ingest markets with Python (`Ingestion/`) using local Ollama parsing.
-2. Normalize and persist snapshots to `Data/markets/`.
-3. Load markets in RAM and match opportunities with the C++ engine (`Engine/`).
-4. Review/execute opportunities through `Execution/run_arb.py`.
+Prediction market payloads are effectively **unregulated at the data-shape level**: field names, market wording, resolution rules, and metadata quality vary across sources and often drift over time.
 
-## Scope
+That inconsistency breaks strict parsers and creates bad matches. This project uses **LLM-assisted parsing + normalization** to convert messy upstream payloads into a single internal schema that the C++ matcher can safely consume.
 
-- **LLM provider:** Ollama only
-- **Matching engine:** C++14
-- **Execution path:** `arbs.json` output from engine -> execution runner
-- **Current positioning:** Ollama is used for low-cost local demos and fast iteration
+## Core pipeline
 
-## Architecture Diagram
+1. Ingest raw markets from multiple APIs.
+2. Use local Ollama models to parse and normalize inconsistent text/metadata.
+3. Persist normalized snapshots.
+4. Run low-latency C++ matching/scoring in memory.
+5. Export opportunities and optionally execute on-chain.
+
+## Flow diagrams
+
+### Data normalization and matching flow
 
 ```mermaid
 flowchart LR
-	A[Predict.fun API + Probable API] --> B[Ollama Ingestion\ncollect + normalize market data]
-	B --> C[Matching Script\nidentify equivalent cross-platform markets]
-	C --> D[In-Memory Market Store\nload matched markets in RAM]
-	D --> E[Dynamic Price Updates\nlive polling / stream refresh]
-	E --> F[Low-Latency C++ Engine\nscore opportunities + emit arbs.json]
-	F --> G[Execution Runner\nsubmit trades]
+	A[Predict.fun API] --> C[Ingestion Layer]
+	B[Probable API] --> C
+	C --> D[LLM Parsing\nOllama]
+	D --> E[Canonical Schema\nData/schemas.py]
+	E --> F[Snapshot Store\nData/markets]
+	F --> G[C++ Engine\nmatcher + scorer]
+	G --> H[arbs.json]
+	H --> I[Execution Runner]
 ```
 
-### Pipeline Summary
+### Lifecycle flow
 
-1. **Ollama ingestion** collects and normalizes market data.
-2. **Matching script** links equivalent markets across platforms.
-3. **Matched markets are loaded in RAM** for fast access.
-4. **Prices are collected dynamically** to keep opportunities fresh.
-5. **Low-latency C++ engine** decides and emits executable opportunities.
-6. **Execution runner** performs trade submission.
+```mermaid
+flowchart TD
+	S[Fetch Market Data] --> P[Parse + Normalize]
+	P --> V[Validate + Deduplicate]
+	V --> M[Cross-Platform Match]
+	M --> R[Risk/Spread Scoring]
+	R --> O[Opportunity Output]
+	O --> X{Execute?}
+	X -- No --> DRY[Dry-run Review]
+	X -- Yes --> LIVE[On-chain Submission]
+```
 
-## User Journey
+## Tech stack
 
-1. Clone repo, install dependencies, and configure `.env`.
-2. Run ingestion for both platforms to create normalized snapshots.
-3. Start matcher/engine to load matched markets into RAM.
-4. Let dynamic pricing refresh opportunity calculations continuously.
-5. Inspect opportunities in dry-run mode.
-6. Enable live execution once wallet/contract settings are ready.
+- Python ingestion and orchestration
+- Ollama for local LLM parsing
+- C++14 matching engine for low-latency scanning
+- Optional Solidity/Hardhat execution contract path
 
-## LLM Strategy
+## Repository layout
 
-- **Today:** Ollama-first for cost control, local development, and demo reliability.
-- **Future plan:** Add Groq as an optional hosted provider for higher throughput and production scaling.
+- `Ingestion/` - source adapters + parsing pipeline
+- `Data/schemas.py` - normalized data contracts
+- `Data/markets/` - generated normalized snapshots
+- `Engine/` - C++ matcher/scorer and build system
+- `Execution/` - dry-run/live opportunity executor
+- `Contracts/` - `ArbExecutor.sol` and deployment tooling
+- `docs/` - setup, build, troubleshooting, API key notes
 
-## Repository Layout
-
-- `Ingestion/` - Predict.fun + Probable ingestion scripts and shared parser
-- `Data/schemas.py` - shared normalized data contracts
-- `Data/markets/` - local snapshot storage (git keeps `.gitkeep` only)
-- `Engine/` - C++ matcher, arb scoring, and output writer
-- `Execution/` - execution runner for opportunities emitted by engine
-- `Contracts/` - `ArbExecutor.sol` and Hardhat deployment tooling
-- `docs/` - build/setup/troubleshooting references
-
-## Quick Start
+## Quick start
 
 ### 1) Prerequisites
 
 - Python 3.11+
 - CMake 3.5+
 - C++ compiler (MinGW/GCC/MSVC)
-- Ollama running locally (`http://localhost:11434`)
-- Node.js 18+ (only if deploying contracts)
+- Ollama running locally at `http://localhost:11434`
+- Node.js 18+ (only for contract deployment)
 
-### 2) Install dependencies
+### 2) Install
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 3) Configure environment
+### 3) Configure env
 
-```bash
-cp .env.example .env
-```
-
-Required minimum values in `.env`:
+Create `.env` and set at minimum:
 
 ```dotenv
 LLM_PROVIDER=ollama
@@ -92,58 +90,24 @@ OLLAMA_BASE_URL=http://localhost:11434
 PREDICTFUN_API_KEY=your_key_here
 ```
 
-`MODEL` can be left empty to use the interactive Ollama model picker.
-
-### 4) Ingest snapshots
+### 4) Ingest
 
 ```bash
 python -m Ingestion.ingest_predictfun
 python -m Ingestion.ingest_probable
 ```
 
-Snapshots are written to `Data/markets/`.
-
-### 5) Build and run matcher
+### 5) Build + run engine
 
 ```bash
 cd Engine
 cmake -S . -B build
 cmake --build build
-
-# Windows
-./build/arb-engine.exe --output arbs.json
-
-# Linux/macOS
-./build/arb-engine --output arbs.json
+./build/arb-engine.exe --output arbs.json   # Windows
+./build/arb-engine --output arbs.json       # Linux/macOS
 ```
 
-The engine loads all snapshots in RAM and writes opportunities to `arbs.json`.
-
-### 6) Execute opportunities
-
-```bash
-python -m Execution.run_arb --arbs Engine/build/arbs.json
-```
-
-Use `--execute` only after setting wallet + contract variables in `.env`.
-
-## Command Reference
-
-### Ingestion
-
-```bash
-python -m Ingestion.ingest_predictfun [--model llama3] [--max-markets 200] [--live]
-python -m Ingestion.ingest_probable   [--model llama3] [--max-markets 200] [--live]
-```
-
-### Engine
-
-```bash
-# From Engine/build
-./arb-engine[.exe] --output arbs.json
-```
-
-### Execution
+### 6) Review or execute
 
 ```bash
 python -m Execution.run_arb --arbs Engine/build/arbs.json
@@ -152,13 +116,17 @@ python -m Execution.run_arb --arbs Engine/build/arbs.json --execute
 
 ## Notes
 
-- ZMQ is optional at compile time. Without it, the engine still runs in snapshot mode.
-- This repository does not track generated snapshots or build outputs.
-- Execution remains dry-run safe by default unless `--execute` is provided.
+- ZMQ is optional; snapshot mode works without it.
+- Generated snapshots/build outputs are not tracked by git.
+- Live execution is opt-in via `--execute`.
 
-## Documentation
+## Docs
 
-- `SETUP_AND_RUN.md` - end-to-end setup walkthrough
-- `docs/BUILD_ENGINE.md` - platform-specific C++ build instructions
-- `docs/API_KEYS.md` - environment variable and credential reference
-- `docs/TROUBLESHOOTING.md` - common failures and fixes
+- `SETUP_AND_RUN.md`
+- `docs/BUILD_ENGINE.md`
+- `docs/API_KEYS.md`
+- `docs/TROUBLESHOOTING.md`
+
+## License
+
+MIT — see `LICENSE`.
