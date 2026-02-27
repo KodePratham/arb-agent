@@ -86,7 +86,7 @@ def _headers() -> dict[str, str]:
     return h
 
 
-def fetch_all_markets() -> list[dict]:
+def fetch_all_markets(max_markets: int | None = None) -> list[dict]:
     """
     Paginate through the Probable markets API.
 
@@ -109,7 +109,13 @@ def fetch_all_markets() -> list[dict]:
             body = resp.json()
 
             data = body.get("data", body.get("markets", []))
-            markets.extend(data)
+            if max_markets is not None:
+                remaining = max_markets - len(markets)
+                if remaining <= 0:
+                    break
+                markets.extend(data[:remaining])
+            else:
+                markets.extend(data)
             log.info(
                 "Fetched page %d  (%d markets, total %d)",
                 page,
@@ -117,7 +123,7 @@ def fetch_all_markets() -> list[dict]:
                 len(markets),
             )
 
-            if len(data) < page_size:
+            if (max_markets is not None and len(markets) >= max_markets) or len(data) < page_size:
                 break
             page += 1
 
@@ -397,6 +403,12 @@ def parse_args() -> argparse.Namespace:
         default=False,
         help="After ingestion, keep running and publish live odds over ZMQ.",
     )
+    parser.add_argument(
+        "--max-markets",
+        type=int,
+        default=0,
+        help="Optional cap on number of open markets fetched (0 = no cap).",
+    )
     return parser.parse_args()
 
 
@@ -413,7 +425,8 @@ async def main() -> None:
     log.info("═══  Probable Ingestion Node [%s]  ═══", NODE_ID)
 
     # Step 1 — Fetch
-    raw_markets = await asyncio.to_thread(fetch_all_markets)
+    max_markets = args.max_markets if args.max_markets > 0 else None
+    raw_markets = await asyncio.to_thread(fetch_all_markets, max_markets)
     log.info("Received %d raw markets from API", len(raw_markets))
 
     # Step 2 — Normalise
