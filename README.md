@@ -20,30 +20,94 @@ That inconsistency breaks strict parsers and creates bad matches. This project u
 
 ### Data normalization and matching flow
 
-```mermaid
-flowchart LR
-	A[Predict.fun API] --> C[Ingestion Layer]
-	B[Probable API] --> C
-	C --> D[LLM Parsing\nOllama]
-	D --> E[Canonical Schema\nData/schemas.py]
-	E --> F[Snapshot Store\nData/markets]
-	F --> G[C++ Engine\nmatcher + scorer]
-	G --> H[arbs.json]
-	H --> I[Execution Runner]
+```text
++------------------+          +------------------+
+|  Predict.fun API |          |   Probable API   |
++------------------+          +------------------+
+	    \                          /
+	     \                        /
+		v                      v
+		    +----------------+
+		    | Ingestion Layer|
+		    +----------------+
+				 |
+				 v
+		    +----------------+
+		    |  LLM Parsing   |
+		    |    (Ollama)    |
+		    +----------------+
+				 |
+				 v
+		+---------------------------+
+		| Canonical Schema          |
+		| (Data/schemas.py)         |
+		+---------------------------+
+				 |
+				 v
+		+---------------------------+
+		| Snapshot Store            |
+		| (Data/markets)            |
+		+---------------------------+
+				 |
+				 v
+		+---------------------------+
+		| C++ Engine                |
+		| matcher + scorer          |
+		+---------------------------+
+				 |
+				 v
+			 +-----------+
+			 | arbs.json |
+			 +-----------+
+				 |
+				 v
+		   +--------------------+
+		   |  Execution Runner  |
+		   +--------------------+
 ```
 
 ### Lifecycle flow
 
-```mermaid
-flowchart TD
-	S[Fetch Market Data] --> P[Parse + Normalize]
-	P --> V[Validate + Deduplicate]
-	V --> M[Cross-Platform Match]
-	M --> R[Risk/Spread Scoring]
-	R --> O[Opportunity Output]
-	O --> X{Execute?}
-	X -- No --> DRY[Dry-run Review]
-	X -- Yes --> LIVE[On-chain Submission]
+```text
++--------------------+
+| Fetch Market Data  |
++--------------------+
+	    |
+	    v
++--------------------+
+| Parse + Normalize  |
++--------------------+
+	    |
+	    v
++-------------------------+
+| Validate + Deduplicate  |
++-------------------------+
+	    |
+	    v
++-------------------------+
+| Cross-Platform Match    |
++-------------------------+
+	    |
+	    v
++-------------------------+
+| Risk / Spread Scoring   |
++-------------------------+
+	    |
+	    v
++-------------------------+
+| Opportunity Output      |
++-------------------------+
+	    |
+	    v
+     +------------+
+     | Execute ?  |
+     +------------+
+	 /        \
+	/          \
+     v            v
++-------------------+   +----------------------+
+| Dry-run Review    |   | On-chain Submission  |
++-------------------+   +----------------------+
 ```
 
 ## Tech stack
