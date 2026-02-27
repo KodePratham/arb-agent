@@ -13,22 +13,20 @@ Arb-Agent detects price discrepancies between [Predict.fun](https://predict.fun)
 │                        Ingestion Layer (Python)                  │
 │                                                                  │
 │   ingest_predictfun.py ──┐                                       │
-│                          ├──► JSON snapshots ──► Data/markets_init/
+│                          ├──► JSON snapshots ──► Data/markets/
 │   ingest_probable.py  ───┘                                       │
 │              │                                                   │
-│              └──► Live odds via ZMQ PUB (topic: "odds.*")        │
+│              └──► Live odds polling + ZMQ PUB (topic: "odds.*")   │
 └──────────────────────────┬───────────────────────────────────────┘
                            │  ZMQ (tcp://0.0.0.0:5555)
                            ▼
 ┌──────────────────────────────────────────────────────────────────┐
 │                   Matching Engine (C++14)                         │
 │                                                                  │
-│   1. Loads initial market snapshots from Data/markets_init/      │
+│   1. Loads initial market snapshots from Data/markets/           │
 │   2. Subscribes to live odds updates via ZMQ SUB                 │
 │   3. Scans for cross-platform arb opportunities every 1s         │
-│   4. Executes profitable trades via ArbExecutor contract         │
-│                                                                  │
-│   Publishes alerts via ZMQ PUB (topic: "arb.*")                  │
+│   4. Writes opportunities to arbs.json (execution via Python)    │
 └──────────────────────────┬───────────────────────────────────────┘
                            │  ZMQ
                            ▼
@@ -55,7 +53,7 @@ Arb-Agent detects price discrepancies between [Predict.fun](https://predict.fun)
 |---|---|---|
 | `Ingestion/` | Python | Fetches & normalises markets from Predict.fun and Probable APIs; streams live odds over ZMQ |
 | `Data/` | Python | Pydantic schemas (`NormalizedMarket`, `OddsUpdate`, etc.) shared across all Python code |
-| `Data/markets_init/` | JSON | Persisted market snapshots consumed by the C++ engine at startup |
+| `Data/markets/` | JSON | Persisted market snapshots consumed by the C++ engine at startup |
 | `Engine/` | C++14 | High-frequency matching engine — loads markets, receives live odds, scans for arbs |
 | `Contracts/` | Solidity | `ArbExecutor.sol` smart contract for atomic on-chain arb execution on opBNB |
 | `Alert-system/` | Python | Telegram bot that relays arb alerts |
@@ -187,10 +185,20 @@ python -m Ingestion.ingest_probable
 ```
 
 Each ingestion node will:
-1. Paginate through the platform's REST API to fetch all OPEN markets.
+1. Paginate through the platform's REST API to fetch OPEN markets (optionally capped via `--max-markets`).
 2. Normalise each market into the shared `NormalizedMarket` schema (using LLM for unstructured text fields).
-3. Save JSON snapshots to `Data/markets_init/`.
-4. Open a WebSocket connection and publish live odds updates over ZMQ (`topic: odds.*`).
+3. Save JSON snapshots to `Data/markets/`.
+4. In `--live` mode, poll order books and publish live odds updates over ZMQ (`topic: odds.*`).
+
+### Step 1b — Selective Groq ingestion (API-safe)
+
+Use this mode to fetch only a capped candidate set, then let Groq auto-pick ~5 strict overlap pairs between Predict.fun and Probable:
+
+```bash
+python -m Ingestion.ingest_groq_selective --cap-per-platform 20 --pick-count 5
+```
+
+This writes only the selected overlap markets (about 5 per platform) to `Data/markets/`.
 
 ### Step 2 — Start the matching engine
 
@@ -202,10 +210,10 @@ arb-engine.exe        # Windows
 ```
 
 The engine will:
-1. Load all JSON snapshots from `Data/markets_init/`.
+1. Load all JSON snapshots from `Data/markets/`.
 2. Subscribe to ZMQ for live odds updates on `tcp://0.0.0.0:5555`.
-3. Every 1 second, scan all Predict.fun × Probable market pairs for arbitrage.
-4. Log and (eventually) execute profitable opportunities.
+3. Every 1 second, scan bucketed Predict.fun × Probable equivalents for arbitrage.
+4. Write opportunities to `arbs.json` for `Execution/run_arb.py`.
 
 ### Step 3 — Start Telegram alerts (optional)
 

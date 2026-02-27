@@ -86,7 +86,7 @@ def _headers() -> dict[str, str]:
     return h
 
 
-def fetch_all_markets() -> list[dict]:
+def fetch_all_markets(max_markets: int | None = None) -> list[dict]:
     """
     Paginate through GET /v1/markets?status=OPEN and return the raw
     list of market dicts from the Predict.fun API.
@@ -110,11 +110,17 @@ def fetch_all_markets() -> list[dict]:
             body = resp.json()
 
             page = body.get("data", [])
-            markets.extend(page)
+            if max_markets is not None:
+                remaining = max_markets - len(markets)
+                if remaining <= 0:
+                    break
+                markets.extend(page[:remaining])
+            else:
+                markets.extend(page)
             cursor = body.get("cursor")
             log.info("Fetched %d markets (total so far: %d)", len(page), len(markets))
 
-            if not cursor or len(page) < page_size:
+            if (max_markets is not None and len(markets) >= max_markets) or not cursor or len(page) < page_size:
                 break
 
     return markets
@@ -208,9 +214,41 @@ def normalise_market(raw: dict) -> NormalizedMarket:
         for o in outcomes_raw
     ]
 
-    # Infer yes/no prices from outcomes ordering (Yes=index 0, No=index 1)
-    yes_price = 0.0
-    no_price = 0.0
+    def _coerce_price(v: object) -> float | None:
+        try:
+            if v is None:
+                return None
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    yes_price = _coerce_price(raw.get("yesPrice"))
+    no_price = _coerce_price(raw.get("noPrice"))
+
+    if yes_price is None or no_price is None:
+        for outcome in outcomes_raw:
+            name = str(outcome.get("name", "")).strip().lower()
+            price = (
+                _coerce_price(outcome.get("price"))
+                or _coerce_price(outcome.get("yesPrice"))
+                or _coerce_price(outcome.get("noPrice"))
+                or _coerce_price(outcome.get("probability"))
+                or _coerce_price(outcome.get("lastPrice"))
+            )
+            if price is None:
+                continue
+            if name in {"yes", "up", "true"} and yes_price is None:
+                yes_price = price
+            elif name in {"no", "down", "false"} and no_price is None:
+                no_price = price
+
+    if yes_price is None and no_price is not None:
+        yes_price = max(0.0, min(1.0, 1.0 - no_price))
+    if no_price is None and yes_price is not None:
+        no_price = max(0.0, min(1.0, 1.0 - yes_price))
+
+    yes_price = yes_price if yes_price is not None else 0.0
+    no_price = no_price if no_price is not None else 0.0
 
     oracle = _infer_oracle(raw)
     underlying, strike = _extract_underlying(raw)
@@ -395,6 +433,12 @@ def parse_args() -> argparse.Namespace:
         default=False,
         help="After ingestion, keep running and publish live odds over ZMQ.",
     )
+    parser.add_argument(
+        "--max-markets",
+        type=int,
+        default=0,
+        help="Optional cap on number of open markets fetched (0 = no cap).",
+    )
     return parser.parse_args()
 
 
@@ -411,7 +455,8 @@ async def main() -> None:
     log.info("═══  Predict.fun Ingestion Node [%s]  ═══", NODE_ID)
 
     # Step 1 — Fetch
-    raw_markets = await asyncio.to_thread(fetch_all_markets)
+    max_markets = args.max_markets if args.max_markets > 0 else None
+    raw_markets = await asyncio.to_thread(fetch_all_markets, max_markets)
     log.info("Received %d raw markets from API", len(raw_markets))
 
     # Step 2 — Normalise
