@@ -65,8 +65,8 @@ logging.basicConfig(
 
 # ── Config ────────────────────────────────────────────────────────
 
-API_BASE: str = os.getenv("PROBABLE_API_BASE", "https://probable.markets")
-API_KEY: str = os.getenv("PROBABLE_API_KEY", "")  # not required — public read API
+API_BASE: str = os.getenv("PROBABLE_API_BASE", "https://market-api.probable.markets")
+API_KEY: str = os.getenv("PROBABLE_API_KEY", "")  # required — Probable enforces auth even on read endpoints
 WS_URL: str = os.getenv("PROBABLE_WS_URL", "wss://probable.markets/ws")
 ZMQ_ADDR: str = os.getenv("ZMQ_ENGINE_ADDR", "tcp://0.0.0.0:5555")
 DATA_DIR: Path = ROOT / "Data" / "markets"
@@ -79,10 +79,15 @@ NODE_ID: str = uuid.uuid4().hex[:8]
 
 
 def _headers() -> dict[str, str]:
-    """Probable's public API does not require auth for read endpoints."""
+    """Probable requires a Bearer token even for read endpoints."""
     h: dict[str, str] = {"Accept": "application/json"}
-    if API_KEY:  # optional — only needed for write/order endpoints
+    if API_KEY:
         h["Authorization"] = f"Bearer {API_KEY}"
+    else:
+        log.warning(
+            "PROBABLE_API_KEY is not set — requests will likely be rejected "
+            "with 401/403. Set it in your .env file: PROBABLE_API_KEY=<your_key>"
+        )
     return h
 
 
@@ -105,6 +110,11 @@ def fetch_all_markets(max_markets: int | None = None) -> list[dict]:
                 "status": "open",
             }
             resp = client.get("/v1/markets", params=params)
+            if resp.status_code in (401, 403):
+                raise RuntimeError(
+                    f"Probable API returned {resp.status_code}: authentication required. "
+                    "Set PROBABLE_API_KEY=<your_key> in your .env file and re-run."
+                )
             resp.raise_for_status()
             body = resp.json()
 
