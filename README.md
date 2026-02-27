@@ -1,8 +1,8 @@
 # arb-agent
 
-Ollama-first prediction-market arbitrage pipeline for Predict.fun and Probable.
+Prediction-market arbitrage pipeline for Predict.fun and Probable.
 
-The project is intentionally focused on one production path:
+The current production path is intentionally focused and simple:
 
 1. Ingest markets with Python (`Ingestion/`) using local Ollama parsing.
 2. Normalize and persist snapshots to `Data/markets/`.
@@ -14,7 +14,42 @@ The project is intentionally focused on one production path:
 - **LLM provider:** Ollama only
 - **Matching engine:** C++14
 - **Execution path:** `arbs.json` output from engine -> execution runner
-- **No alternate ingestion stacks:** Groq and string-ingestion removed
+- **Current positioning:** Ollama is used for low-cost local demos and fast iteration
+
+## Architecture Diagram
+
+```mermaid
+flowchart LR
+	A[Predict.fun API + Probable API] --> B[Ollama Ingestion\ncollect + normalize market data]
+	B --> C[Matching Script\nidentify equivalent cross-platform markets]
+	C --> D[In-Memory Market Store\nload matched markets in RAM]
+	D --> E[Dynamic Price Updates\nlive polling / stream refresh]
+	E --> F[Low-Latency C++ Engine\nscore opportunities + emit arbs.json]
+	F --> G[Execution Runner\nsubmit trades]
+```
+
+### Pipeline Summary
+
+1. **Ollama ingestion** collects and normalizes market data.
+2. **Matching script** links equivalent markets across platforms.
+3. **Matched markets are loaded in RAM** for fast access.
+4. **Prices are collected dynamically** to keep opportunities fresh.
+5. **Low-latency C++ engine** decides and emits executable opportunities.
+6. **Execution runner** performs trade submission.
+
+## User Journey
+
+1. Clone repo, install dependencies, and configure `.env`.
+2. Run ingestion for both platforms to create normalized snapshots.
+3. Start matcher/engine to load matched markets into RAM.
+4. Let dynamic pricing refresh opportunity calculations continuously.
+5. Inspect opportunities in dry-run mode.
+6. Enable live execution once wallet/contract settings are ready.
+
+## LLM Strategy
+
+- **Today:** Ollama-first for cost control, local development, and demo reliability.
+- **Future plan:** Add Groq as an optional hosted provider for higher throughput and production scaling.
 
 ## Repository Layout
 
