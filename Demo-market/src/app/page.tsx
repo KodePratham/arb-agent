@@ -29,6 +29,8 @@ type MarketView = {
 
 const REQUIRED_MARKETS = [0, 1];
 const CHAD_TRADE_SIZE_TBNB = "0.01";
+const SHARE_UNIT_TBNB = 0.005;
+const SHARE_UNIT_WEI = parseEther("0.005");
 
 const formatShortAddress = (address: string) => `${address.slice(0, 6)}...${address.slice(-4)}`;
 
@@ -39,6 +41,7 @@ export default function Home() {
   const [busy, setBusy] = useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [amountByMarket, setAmountByMarket] = useState<Record<number, string>>({ 0: "0.01", 1: "0.01" });
+  const [sellSharesByMarket, setSellSharesByMarket] = useState<Record<number, string>>({ 0: "1", 1: "1" });
   const [markets, setMarkets] = useState<MarketView[]>([]);
   const [chadStatus, setChadStatus] = useState<string>("Inactive");
   const [spreadBps, setSpreadBps] = useState<number | null>(null);
@@ -193,29 +196,52 @@ export default function Home() {
     }
   };
 
-  const runTrade = async (marketId: number, action: "add" | "yes" | "no") => {
+  const runTrade = async (marketId: number, action: "add" | "yes" | "no" | "sellYes" | "sellNo") => {
     setBusy(true);
     setStatus("");
 
     try {
-      const amountRaw = amountByMarket[marketId];
-      if (!amountRaw) {
-        throw new Error("Enter an amount in tBNB.");
-      }
-
       const provider = await getBrowserProvider();
       await ensureBscNetwork();
       const signer = await provider.getSigner();
       const contract = new Contract(CONTRACT_ADDRESS, AMM_ABI, signer);
-      const amount = parseEther(amountRaw);
 
       let tx;
       if (action === "add") {
+        const amountRaw = amountByMarket[marketId];
+        if (!amountRaw) {
+          throw new Error("Enter an amount in tBNB.");
+        }
+        const amount = parseEther(amountRaw);
         tx = await contract.addLiquidity(marketId, { value: amount });
       } else if (action === "yes") {
+        const amountRaw = amountByMarket[marketId];
+        if (!amountRaw) {
+          throw new Error("Enter an amount in tBNB.");
+        }
+        const amount = parseEther(amountRaw);
         tx = await contract.buyYes(marketId, { value: amount });
-      } else {
+      } else if (action === "no") {
+        const amountRaw = amountByMarket[marketId];
+        if (!amountRaw) {
+          throw new Error("Enter an amount in tBNB.");
+        }
+        const amount = parseEther(amountRaw);
         tx = await contract.buyNo(marketId, { value: amount });
+      } else if (action === "sellYes") {
+        const shareCountRaw = sellSharesByMarket[marketId];
+        if (!shareCountRaw || Number(shareCountRaw) <= 0) {
+          throw new Error("Enter share count to sell.");
+        }
+        const sharesIn = parseEther((Number(shareCountRaw) * SHARE_UNIT_TBNB).toFixed(6));
+        tx = await contract.sellYes(marketId, sharesIn);
+      } else {
+        const shareCountRaw = sellSharesByMarket[marketId];
+        if (!shareCountRaw || Number(shareCountRaw) <= 0) {
+          throw new Error("Enter share count to sell.");
+        }
+        const sharesIn = parseEther((Number(shareCountRaw) * SHARE_UNIT_TBNB).toFixed(6));
+        tx = await contract.sellNo(marketId, sharesIn);
       }
 
       await tx.wait();
@@ -371,7 +397,9 @@ export default function Home() {
         </div>
 
         <p className="mt-3 text-sm font-medium">Chad trade size: {CHAD_TRADE_SIZE_TBNB} tBNB per leg.</p>
+        <p className="mt-1 text-sm font-medium">Share unit: 1 share = {SHARE_UNIT_TBNB} tBNB notional.</p>
         <p className="mt-1 text-sm font-medium">Detected markets onchain: {marketCount}</p>
+        <p className="mt-1 text-sm font-medium">Arbitrage logic: Chad buys YES on the lower-priced market and hedges with NO on the higher-priced market.</p>
 
         {!hasWallet && <p className="mt-2 text-sm font-semibold">Showing markets in read-only mode. Install MetaMask to trade.</p>}
         {!ready && (
@@ -390,8 +418,11 @@ export default function Home() {
       <section className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2">
         {markets.map((market) => {
           const amount = amountByMarket[market.id] || "";
+          const sellShareCount = sellSharesByMarket[market.id] || "";
           const yesPercent = Number(market.yesPriceBps) / 100;
           const noPercent = 100 - yesPercent;
+          const userYesShareCount = Number(market.userYesShares) / Number(SHARE_UNIT_WEI);
+          const userNoShareCount = Number(market.userNoShares) / Number(SHARE_UNIT_WEI);
 
           return (
             <article key={market.id} className="rounded-3xl border-2 border-zinc-950 bg-white p-5 shadow-sm">
@@ -430,8 +461,8 @@ export default function Home() {
                   </div>
                 </div>
 
-                <p className="rounded-lg border border-zinc-950/30 bg-zinc-50 px-3 py-2">Your YES shares: {formatEther(market.userYesShares)}</p>
-                <p className="rounded-lg border border-zinc-950/30 bg-zinc-50 px-3 py-2">Your NO shares: {formatEther(market.userNoShares)}</p>
+                <p className="rounded-lg border border-zinc-950/30 bg-zinc-50 px-3 py-2">Your YES shares: {userYesShareCount.toFixed(4)}</p>
+                <p className="rounded-lg border border-zinc-950/30 bg-zinc-50 px-3 py-2">Your NO shares: {userNoShareCount.toFixed(4)}</p>
                 {market.resolved && (
                   <p className="rounded-lg border border-zinc-950/30 bg-zinc-50 px-3 py-2">
                     Final result: {market.outcomeYes ? "YES won" : "NO won"}
@@ -456,7 +487,19 @@ export default function Home() {
                 placeholder="Amount in tBNB"
               />
 
-              <div className="mt-3 grid grid-cols-3 gap-2">
+              <input
+                className="mt-2 w-full rounded-xl border-2 border-zinc-950 px-3 py-2 text-sm font-semibold"
+                value={sellShareCount}
+                onChange={(event) =>
+                  setSellSharesByMarket((prev) => ({
+                    ...prev,
+                    [market.id]: event.target.value,
+                  }))
+                }
+                placeholder="Shares to sell (count)"
+              />
+
+              <div className="mt-3 grid grid-cols-5 gap-2">
                 <button
                   onClick={() => runTrade(market.id, "add")}
                   disabled={busy || !ready || !market.active || !account}
@@ -477,6 +520,20 @@ export default function Home() {
                   className="rounded-xl border-2 border-zinc-950 bg-cyan-200 px-2 py-2 text-xs font-black transition hover:-translate-y-px disabled:opacity-50"
                 >
                   Buy NO
+                </button>
+                <button
+                  onClick={() => runTrade(market.id, "sellYes")}
+                  disabled={busy || !ready || !market.active || !account}
+                  className="rounded-xl border-2 border-zinc-950 bg-fuchsia-100 px-2 py-2 text-xs font-black transition hover:-translate-y-px disabled:opacity-50"
+                >
+                  Sell YES
+                </button>
+                <button
+                  onClick={() => runTrade(market.id, "sellNo")}
+                  disabled={busy || !ready || !market.active || !account}
+                  className="rounded-xl border-2 border-zinc-950 bg-cyan-100 px-2 py-2 text-xs font-black transition hover:-translate-y-px disabled:opacity-50"
+                >
+                  Sell NO
                 </button>
               </div>
 

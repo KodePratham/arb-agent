@@ -22,6 +22,8 @@ export const AMM_ABI = [
   "function addLiquidity(uint256 marketId) payable",
   "function buyYes(uint256 marketId) payable returns (uint256)",
   "function buyNo(uint256 marketId) payable returns (uint256)",
+  "function sellYes(uint256 marketId, uint256 sharesIn) returns (uint256)",
+  "function sellNo(uint256 marketId, uint256 sharesIn) returns (uint256)",
   "function resolveMarket(uint256 marketId, bool outcomeYes)",
   "function claimWinnings(uint256 marketId) returns (uint256)",
 ];

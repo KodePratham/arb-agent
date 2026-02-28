@@ -2,25 +2,25 @@ import { NextRequest, NextResponse } from "next/server";
 import { Contract, JsonRpcProvider, Wallet } from "ethers";
 import { AMM_ABI } from "@/lib/contract";
 
+const MARKET_IDS = [0, 1];
+
 export async function POST(request: NextRequest) {
   try {
-    const { marketId, outcomeYes, adminKey } = (await request.json()) as {
-      marketId?: number;
+    const { outcomeYes, adminUser, adminPass } = (await request.json()) as {
       outcomeYes?: boolean;
-      adminKey?: string;
+      adminUser?: string;
+      adminPass?: string;
     };
 
-    const expectedAdminKey = process.env.ADMIN_API_KEY;
-    if (!expectedAdminKey) {
-      return NextResponse.json({ error: "Missing ADMIN_API_KEY in env." }, { status: 500 });
+    const expectedUser = process.env.ADMIN_USER;
+    const expectedPass = process.env.ADMIN_PASS;
+
+    if (!expectedUser || !expectedPass) {
+      return NextResponse.json({ error: "Missing ADMIN_USER / ADMIN_PASS in env." }, { status: 500 });
     }
 
-    if (!adminKey || adminKey !== expectedAdminKey) {
+    if (!adminUser || !adminPass || adminUser !== expectedUser || adminPass !== expectedPass) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    if (!Number.isInteger(marketId) || (marketId ?? -1) < 0) {
-      return NextResponse.json({ error: "marketId must be a non-negative integer." }, { status: 400 });
     }
 
     if (typeof outcomeYes !== "boolean") {
@@ -46,14 +46,23 @@ export async function POST(request: NextRequest) {
     const signer = new Wallet(privateKey, provider);
     const contract = new Contract(contractAddress, AMM_ABI, signer);
 
-    const tx = await contract.resolveMarket(marketId, outcomeYes);
-    const receipt = await tx.wait();
+    const txHashes: string[] = [];
+
+    for (const marketId of MARKET_IDS) {
+      const [resolved] = (await contract.getMarketStatus(marketId)) as [boolean, boolean];
+      if (resolved) {
+        continue;
+      }
+      const tx = await contract.resolveMarket(marketId, outcomeYes);
+      const receipt = await tx.wait();
+      txHashes.push(receipt?.hash || tx.hash);
+    }
 
     return NextResponse.json({
       ok: true,
-      txHash: receipt?.hash || tx.hash,
-      marketId,
       outcomeYes,
+      txHashes,
+      message: txHashes.length ? "Markets resolved." : "All markets already resolved.",
     });
   } catch (error) {
     return NextResponse.json({ error: (error as Error).message || "Resolve failed." }, { status: 500 });

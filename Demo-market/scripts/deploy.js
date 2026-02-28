@@ -11,7 +11,7 @@ async function main() {
     process.env.OPBNB_TESTNET_RPC_URL ||
     "https://data-seed-prebsc-1-s1.bnbchain.org:8545";
   const privateKey = process.env.DEPLOYER_PRIVATE_KEY;
-  const seedTbnb = process.env.DEPLOY_SEED_TBNB || "0.01";
+  const seedTbnb = process.env.DEPLOY_SEED_TBNB || "0.005";
 
   if (!privateKey) {
     throw new Error("Set DEPLOYER_PRIVATE_KEY in .env before deployment.");

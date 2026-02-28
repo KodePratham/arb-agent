@@ -27,9 +27,10 @@ DEPLOYER_PRIVATE_KEY=0x...
 
 NEXT_PUBLIC_CONTRACT_ADDRESS=0x...
 NEXT_PUBLIC_CHAIN_ID=97
-ADMIN_API_KEY=...
+ADMIN_USER=...
+ADMIN_PASS=...
 ADMIN_PRIVATE_KEY=0x... # optional, defaults to DEPLOYER_PRIVATE_KEY
-DEPLOY_SEED_TBNB=0.01
+DEPLOY_SEED_TBNB=0.005
 ```
 
 ## 2) Compile + deploy to BSC testnet
@@ -54,9 +55,9 @@ Use `Activate Chad` to run the arbitrage step when market prices diverge.
 ## 4) Admin finalization
 
 - Open `http://localhost:3067/admin`
-- Enter `ADMIN_API_KEY`
-- Choose market id and final outcome (YES or NO)
-- Submit to finalize the market on-chain
+- Enter `ADMIN_USER` and `ADMIN_PASS`
+- Select final outcome (YES or NO)
+- Submit once to finalize both similar markets on-chain
 
 After finalization, users can claim winnings from the main dashboard.
 
@@ -68,10 +69,13 @@ The UI now shows explicit ACTIVE/INACTIVE states for:
 ## Notes
 
 - The deploy script seeds exactly 2 Mars markets and verifies both are active.
-- Seed per market is controlled by `DEPLOY_SEED_TBNB` (default `0.01`).
+- Seed per market is controlled by `DEPLOY_SEED_TBNB` (default `0.005`).
 - The deploy script automatically writes `NEXT_PUBLIC_CONTRACT_ADDRESS` into `.env.local`.
 - Markets are viewable even before MetaMask connects (read-only mode via public RPC).
 - Winners claim on-chain payouts after admin resolves each market.
+- Users can sell YES/NO shares before market resolution.
+- Share display is normalized: 1 share = 0.005 tBNB notional at launch.
+- Arbitrage bot behavior: buy YES on the lower-priced market and hedge with NO on the higher-priced market.
 - Questions are:
 	- Will humans land on mars by 2030
 	- Successful Human Mars mission by 2030?

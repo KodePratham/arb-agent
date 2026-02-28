@@ -4,8 +4,8 @@ import Link from "next/link";
 import { FormEvent, useState } from "react";
 
 export default function AdminPage() {
-  const [adminKey, setAdminKey] = useState("");
-  const [marketId, setMarketId] = useState("0");
+  const [adminUser, setAdminUser] = useState("");
+  const [adminPass, setAdminPass] = useState("");
   const [outcomeYes, setOutcomeYes] = useState(true);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
@@ -20,18 +20,19 @@ export default function AdminPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          marketId: Number(marketId),
           outcomeYes,
-          adminKey,
+          adminUser,
+          adminPass,
         }),
       });
 
-      const data = (await response.json()) as { ok?: boolean; txHash?: string; error?: string };
+      const data = (await response.json()) as { ok?: boolean; message?: string; txHashes?: string[]; error?: string };
       if (!response.ok || !data.ok) {
         throw new Error(data.error || "Resolution failed.");
       }
 
-      setStatus(`Resolved successfully. Tx: ${data.txHash}`);
+      const hashText = data.txHashes?.length ? ` Txs: ${data.txHashes.join(", ")}` : "";
+      setStatus(`${data.message || "Resolved successfully."}${hashText}`);
     } catch (error) {
       setStatus((error as Error).message || "Resolution failed.");
     } finally {
@@ -49,24 +50,22 @@ export default function AdminPage() {
           </Link>
         </div>
 
-        <p className="mb-4 text-sm font-medium">Resolve a market by setting final outcome (YES or NO). Access is protected by server env key.</p>
+        <p className="mb-4 text-sm font-medium">Set one final result for both similar markets.</p>
 
         <form onSubmit={submitResolution} className="space-y-3">
           <input
-            type="password"
-            value={adminKey}
-            onChange={(event) => setAdminKey(event.target.value)}
-            placeholder="Admin key"
+            value={adminUser}
+            onChange={(event) => setAdminUser(event.target.value)}
+            placeholder="Admin user"
             className="w-full rounded-xl border-2 border-zinc-950 px-3 py-2 text-sm font-semibold"
             required
           />
 
           <input
-            type="number"
-            min={0}
-            value={marketId}
-            onChange={(event) => setMarketId(event.target.value)}
-            placeholder="Market ID"
+            type="password"
+            value={adminPass}
+            onChange={(event) => setAdminPass(event.target.value)}
+            placeholder="Admin password"
             className="w-full rounded-xl border-2 border-zinc-950 px-3 py-2 text-sm font-semibold"
             required
           />
@@ -93,7 +92,7 @@ export default function AdminPage() {
             disabled={busy}
             className="w-full rounded-xl border-2 border-zinc-950 bg-lime-300 px-3 py-2 text-sm font-black disabled:opacity-50"
           >
-            {busy ? "Resolving..." : "Set Final Result"}
+            {busy ? "Resolving..." : "Set Final Result (Both Markets)"}
           </button>
         </form>
 

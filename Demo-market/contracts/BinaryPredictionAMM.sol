@@ -11,10 +11,16 @@ contract BinaryPredictionAMM is Ownable {
         bool exists;
         bool resolved;
         bool outcomeYes;
+        uint256 totalYesShares;
+        uint256 totalNoShares;
+        uint256 finalPool;
+        uint256 winningSharesAtResolution;
     }
 
     uint256 public marketCount;
     uint256 public immutable feeBps;
+    uint256 public constant VIRTUAL_LIQUIDITY = 1 ether;
+
     mapping(uint256 => Market) public markets;
     mapping(uint256 => mapping(address => uint256)) public userYesShares;
     mapping(uint256 => mapping(address => uint256)) public userNoShares;
@@ -23,6 +29,8 @@ contract BinaryPredictionAMM is Ownable {
     event LiquidityAdded(uint256 indexed marketId, address indexed provider, uint256 amount);
     event YesBought(uint256 indexed marketId, address indexed trader, uint256 amountIn, uint256 sharesOut);
     event NoBought(uint256 indexed marketId, address indexed trader, uint256 amountIn, uint256 sharesOut);
+    event YesSold(uint256 indexed marketId, address indexed trader, uint256 sharesIn, uint256 amountOut);
+    event NoSold(uint256 indexed marketId, address indexed trader, uint256 sharesIn, uint256 amountOut);
     event MarketResolved(uint256 indexed marketId, bool outcomeYes);
     event WinningsClaimed(uint256 indexed marketId, address indexed user, uint256 amount);
 
@@ -71,11 +79,15 @@ contract BinaryPredictionAMM is Ownable {
         require(!m.resolved, "market resolved");
 
         uint256 amountInWithFee = (msg.value * (10000 - feeBps)) / 10000;
-        sharesOut = _cpmmOut(amountInWithFee, m.yesPool, m.noPool);
+        sharesOut = _cpmmOut(amountInWithFee, m.yesPool + VIRTUAL_LIQUIDITY, m.noPool + VIRTUAL_LIQUIDITY);
+        if (sharesOut > m.noPool) {
+            sharesOut = m.noPool;
+        }
 
         m.yesPool += amountInWithFee;
         m.noPool -= sharesOut;
         userYesShares[marketId][msg.sender] += sharesOut;
+        m.totalYesShares += sharesOut;
 
         emit YesBought(marketId, msg.sender, msg.value, sharesOut);
     }
@@ -87,13 +99,67 @@ contract BinaryPredictionAMM is Ownable {
         require(!m.resolved, "market resolved");
 
         uint256 amountInWithFee = (msg.value * (10000 - feeBps)) / 10000;
-        sharesOut = _cpmmOut(amountInWithFee, m.noPool, m.yesPool);
+        sharesOut = _cpmmOut(amountInWithFee, m.noPool + VIRTUAL_LIQUIDITY, m.yesPool + VIRTUAL_LIQUIDITY);
+        if (sharesOut > m.yesPool) {
+            sharesOut = m.yesPool;
+        }
 
         m.noPool += amountInWithFee;
         m.yesPool -= sharesOut;
         userNoShares[marketId][msg.sender] += sharesOut;
+        m.totalNoShares += sharesOut;
 
         emit NoBought(marketId, msg.sender, msg.value, sharesOut);
+    }
+
+    function sellYes(uint256 marketId, uint256 sharesIn) external returns (uint256 amountOut) {
+        Market storage m = _getMarket(marketId);
+        require(!m.resolved, "market resolved");
+        require(sharesIn > 0, "shares 0");
+        require(userYesShares[marketId][msg.sender] >= sharesIn, "insufficient yes shares");
+
+        amountOut = _cpmmOut(sharesIn, m.noPool + VIRTUAL_LIQUIDITY, m.yesPool + VIRTUAL_LIQUIDITY);
+        if (amountOut > m.yesPool) {
+            amountOut = m.yesPool;
+        }
+
+        uint256 amountOutWithFee = (amountOut * (10000 - feeBps)) / 10000;
+
+        userYesShares[marketId][msg.sender] -= sharesIn;
+        m.totalYesShares -= sharesIn;
+
+        m.noPool += sharesIn;
+        m.yesPool -= amountOut;
+
+        (bool success,) = payable(msg.sender).call{value: amountOutWithFee}("");
+        require(success, "transfer failed");
+
+        emit YesSold(marketId, msg.sender, sharesIn, amountOutWithFee);
+    }
+
+    function sellNo(uint256 marketId, uint256 sharesIn) external returns (uint256 amountOut) {
+        Market storage m = _getMarket(marketId);
+        require(!m.resolved, "market resolved");
+        require(sharesIn > 0, "shares 0");
+        require(userNoShares[marketId][msg.sender] >= sharesIn, "insufficient no shares");
+
+        amountOut = _cpmmOut(sharesIn, m.yesPool + VIRTUAL_LIQUIDITY, m.noPool + VIRTUAL_LIQUIDITY);
+        if (amountOut > m.noPool) {
+            amountOut = m.noPool;
+        }
+
+        uint256 amountOutWithFee = (amountOut * (10000 - feeBps)) / 10000;
+
+        userNoShares[marketId][msg.sender] -= sharesIn;
+        m.totalNoShares -= sharesIn;
+
+        m.yesPool += sharesIn;
+        m.noPool -= amountOut;
+
+        (bool success,) = payable(msg.sender).call{value: amountOutWithFee}("");
+        require(success, "transfer failed");
+
+        emit NoSold(marketId, msg.sender, sharesIn, amountOutWithFee);
     }
 
     function getMarket(uint256 marketId)
@@ -108,16 +174,16 @@ contract BinaryPredictionAMM is Ownable {
         yesPriceBps = _yesPriceBps(m.yesPool, m.noPool);
     }
 
-    function getUserShares(uint256 marketId, address user) external view returns (uint256 yesShares, uint256 noShares) {
-        _getMarket(marketId);
-        yesShares = userYesShares[marketId][user];
-        noShares = userNoShares[marketId][user];
-    }
-
     function getMarketStatus(uint256 marketId) external view returns (bool resolved, bool outcomeYes) {
         Market storage m = _getMarket(marketId);
         resolved = m.resolved;
         outcomeYes = m.outcomeYes;
+    }
+
+    function getUserShares(uint256 marketId, address user) external view returns (uint256 yesShares, uint256 noShares) {
+        _getMarket(marketId);
+        yesShares = userYesShares[marketId][user];
+        noShares = userNoShares[marketId][user];
     }
 
     function resolveMarket(uint256 marketId, bool outcomeYes) external onlyOwner {
@@ -126,25 +192,35 @@ contract BinaryPredictionAMM is Ownable {
 
         m.resolved = true;
         m.outcomeYes = outcomeYes;
+        m.finalPool = m.yesPool + m.noPool;
+        m.winningSharesAtResolution = outcomeYes ? m.totalYesShares : m.totalNoShares;
 
         emit MarketResolved(marketId, outcomeYes);
     }
 
     function getClaimable(uint256 marketId, address user) public view returns (uint256) {
         Market storage m = _getMarket(marketId);
-        if (!m.resolved) {
+        if (!m.resolved || m.winningSharesAtResolution == 0) {
             return 0;
         }
 
-        return m.outcomeYes ? userYesShares[marketId][user] : userNoShares[marketId][user];
+        uint256 winningShares = m.outcomeYes ? userYesShares[marketId][user] : userNoShares[marketId][user];
+        if (winningShares == 0) {
+            return 0;
+        }
+
+        return (m.finalPool * winningShares) / m.winningSharesAtResolution;
     }
 
     function claimWinnings(uint256 marketId) external returns (uint256 payout) {
         Market storage m = _getMarket(marketId);
         require(m.resolved, "market not resolved");
+        require(m.winningSharesAtResolution > 0, "no winning shares");
 
-        payout = m.outcomeYes ? userYesShares[marketId][msg.sender] : userNoShares[marketId][msg.sender];
-        require(payout > 0, "nothing to claim");
+        uint256 winningShares = m.outcomeYes ? userYesShares[marketId][msg.sender] : userNoShares[marketId][msg.sender];
+        require(winningShares > 0, "nothing to claim");
+
+        payout = (m.finalPool * winningShares) / m.winningSharesAtResolution;
         require(address(this).balance >= payout, "insufficient balance");
 
         if (m.outcomeYes) {
