@@ -1,143 +1,172 @@
 # arb-agent
 
-Open-source arbitrage infrastructure for prediction markets.
+Autonomous arbitrage infrastructure for prediction markets.
 
-This repo combines resilient data ingestion, LLM-assisted normalization, and a low-latency C++ matcher to detect cross-platform pricing inefficiencies and route opportunities to execution.
-
-## TL;DR
-
-- **Problem:** real-world market APIs are inconsistent, under-documented, and prone to schema drift.
-- **Approach:** normalize messy payloads into one canonical schema using local LLM parsing.
-- **Core edge:** keep matching/scoring hot in C++ memory for speed.
-- **Outcome:** a practical arbitrage pipeline from ingestion to execution.
-
-## Why this matters
-
-Prediction market arbitrage is not blocked by one hard algorithm — it is blocked by data quality.
-
-Different platforms describe similar outcomes in different formats, with inconsistent field names, ambiguous market wording, and irregular metadata. This project is designed to survive that reality:
-
-1. absorb heterogeneous payloads,
-2. normalize semantics,
-3. match equivalent outcomes quickly,
-4. emit executable opportunities.
-
-## Why we built the Demo Market
-
-During the hackathon, external API coverage and stable parsing signals were limited. Instead of waiting for ideal upstream data, we built **`Demo-market/`** to validate the core mechanics end-to-end:
-
-- AMM pricing behavior
-- spread divergence and convergence
-- arbitrage loop logic
-- on-chain settlement flow
-
-The demo lets judges and contributors test the engine ideas immediately while we continue hardening real-world ingestion quality.
+This repository ingests heterogeneous market data, normalizes it into a canonical schema, runs a low-latency C++ matching/scoring engine, and routes opportunities to a Python execution runner.
 
 ## Architecture
 
 ```text
-Predict.fun / Probable / Other Sources
-                |
-                v
-        Ingestion Adapters (Python)
-                |
-                v
-      LLM Parse + Canonical Normalize
-                |
-                v
-      Data/schemas.py + snapshots (JSON)
-                |
-                v
-      C++ Matching + Spread Scoring
-                |
-                v
-         opportunities (arbs.json)
-                |
-                v
-      Execution Runner / On-chain path
+                      +-----------------------------+
+                      | Ingestion (Python)          |
+                      | Predict.fun / Probable      |
+                      +-------------+---------------+
+                                    |
+                     LLM parse + canonical normalize
+                                    |
+                                    v
+                      +-----------------------------+
+                      | Data/markets/*.json         |
+                      | Canonical snapshots         |
+                      +-------------+---------------+
+                                    |
+                                    v
+                      +-----------------------------+
+                      | Engine (C++)                |
+                      | Match + score spreads       |
+                      | Emits arbs.json             |
+                      +-------------+---------------+
+                                    |
+                                    v
+                      +-----------------------------+
+                      | Execution (Python)          |
+                      | Dry-run / on-chain scaffold |
+                      +-----------------------------+
+
+                      +-----------------------------+
+                      | Demo-market (Next.js + AMM) |
+                      | End-to-end UI simulation    |
+                      +-----------------------------+
 ```
 
-## Repository map
+## How It Works
 
-- `Ingestion/` — platform adapters and parser orchestration
-- `Data/schemas.py` — canonical schema contracts
-- `Data/markets/` — normalized snapshots consumed by engine
-- `Engine/` — C++ matcher/scorer (`cmake` build)
-- `Execution/` — dry-run/live execution entrypoint
-- `Contracts/` — optional Solidity executor + deployment scripts
-- `Demo-market/` — UX + on-chain simulation of market + arb behavior
-- `docs/` — setup, API key, build, and troubleshooting guides
+1. Ingestion adapters fetch raw market payloads from external platforms.
+2. Parsers normalize noisy schemas into the canonical types in `Data/schemas.py`.
+3. The C++ engine loads all normalized snapshots into memory and detects cross-platform opportunities.
+4. Opportunities are written to `arbs.json` with pricing/spread/size metadata.
+5. The execution runner reads `arbs.json` and either:
+   - prints a dry-run execution plan, or
+   - submits transactions when `--execute` is enabled and execution inputs are configured.
 
-## Quick start
+## C++ Execution Engine
 
-### 1) Prerequisites
+The execution core is in `Engine/` and is built with CMake.
 
-- Python 3.11+
-- CMake 3.5+
-- C++ compiler (MSVC/MinGW/GCC/Clang)
-- Ollama running locally (`http://localhost:11434`)
-- Node.js 18+ (optional, contract/deploy paths)
+### What the engine does
 
-### 2) Install dependencies
+- Loads normalized markets from `Data/markets/*.json`.
+- Deduplicates by platform + market id.
+- Builds in-memory indexes for fast matching.
+- Continuously scans for profitable cross-market opportunities.
+- Writes ranked opportunities to JSON (`arbs.json`).
 
-```bash
-pip install -r requirements.txt
+### Build
+
+Windows (MinGW):
+
+```powershell
+cd Engine
+cmake -S . -B build -G "MinGW Makefiles"
+cmake --build build
 ```
 
-### 3) Configure environment
+Windows (MSVC):
 
-Create `.env` and set at minimum:
-
-```dotenv
-LLM_PROVIDER=ollama
-MODEL=
-OLLAMA_BASE_URL=http://localhost:11434
-PREDICTFUN_API_KEY=your_key_here
+```powershell
+cd Engine
+cmake -S . -B build -G "Visual Studio 17 2022"
+cmake --build build --config Release
 ```
 
-### 4) Run ingestion
-
-```bash
-python -m Ingestion.ingest_predictfun
-python -m Ingestion.ingest_probable
-```
-
-### 5) Build and run engine
+Linux/macOS:
 
 ```bash
 cd Engine
 cmake -S . -B build
 cmake --build build
-./build/arb-engine.exe --output arbs.json   # Windows
-./build/arb-engine --output arbs.json       # Linux/macOS
 ```
 
-### 6) Review or execute opportunities
+### Run
+
+From repo root:
+
+```powershell
+.\Engine\build\arb-engine.exe --output Engine\build\arbs.json
+```
+
+or on Linux/macOS:
 
 ```bash
-python -m Execution.run_arb --arbs Engine/build/arbs.json
-python -m Execution.run_arb --arbs Engine/build/arbs.json --execute
+./Engine/build/arb-engine --output Engine/build/arbs.json
 ```
 
-## Open-source goals
+### Execution handoff
 
-We want this to be a reference stack for market-neutral prediction market infra.
+Run the Python executor against generated opportunities:
 
-Near-term contribution areas:
+```powershell
+python -m Execution.run_arb --arbs Engine\build\arbs.json
+python -m Execution.run_arb --arbs Engine\build\arbs.json --execute
+```
 
-- new source adapters and schema mappers
-- stronger semantic market equivalence scoring
-- risk model calibration and execution safeguards
-- benchmarking datasets and reproducible evals
+Note: live submission is scaffolded and requires exchange order construction + signing inputs.
 
-## Engineering principles
+## Demo Market
 
-- **Schema first:** all downstream systems rely on a strict canonical contract.
-- **Deterministic core:** scoring and matching remain deterministic and explainable.
-- **Local-first parsing:** LLM parsing can run with local Ollama models.
-- **Execution safety:** live mode is explicit and opt-in.
+`Demo-market/` is an end-to-end demo environment to validate market mechanics and arbitrage behavior independently of external API instability.
 
-## Additional docs
+### What it includes
+
+- Next.js frontend dashboard (`Demo-market/src/app`).
+- Solidity AMM contract (`Demo-market/contracts/BinaryPredictionAMM.sol`).
+- Hardhat deploy flow (`Demo-market/scripts/deploy.js`).
+- Admin resolution route (`Demo-market/src/app/api/admin/resolve/route.ts`).
+
+### Demo capabilities
+
+- Two binary markets shown side-by-side.
+- Wallet connect + BSC testnet switching.
+- Liquidity add/remove and YES/NO buy-sell flow.
+- “Activate Chad” arbitrage action for spread scenarios.
+- Admin market resolution and winner claiming.
+
+### Run demo market
+
+```powershell
+cd Demo-market
+npm install
+npm run hardhat:compile
+npm run hardhat:deploy:bsc
+npm run dev
+```
+
+Then open `http://localhost:3067`.
+
+## Repository Structure
+
+```text
+Ingestion/             Python source adapters + parser orchestration
+Data/schemas.py        Canonical schema definitions
+Data/markets/          Normalized market snapshots
+Engine/                C++ matcher/scorer and output writer
+Execution/             Python arb runner (dry-run + execute scaffold)
+Contracts/             Solidity ArbExecutor + deployment scripts
+Demo-market/           Next.js + Hardhat AMM demo app
+docs/                  Build, API keys, troubleshooting guides
+```
+
+## Quick Start
+
+```powershell
+pip install -r requirements.txt
+python -m Ingestion.ingest_predictfun
+python -m Ingestion.ingest_probable
+.\Engine\build\arb-engine.exe --output Engine\build\arbs.json
+python -m Execution.run_arb --arbs Engine\build\arbs.json
+```
+
+For complete setup, see:
 
 - `SETUP_AND_RUN.md`
 - `docs/BUILD_ENGINE.md`
