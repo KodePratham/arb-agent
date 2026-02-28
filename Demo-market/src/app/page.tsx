@@ -33,7 +33,7 @@ type TourStep = {
 };
 
 const REQUIRED_MARKETS = [0, 1];
-const CHAD_TRADE_SIZE_TBNB = "0.01";
+const CHAD_TRADE_SIZE_TBNB = "0.001";
 
 const TOUR_STEPS: TourStep[] = [
   {
@@ -66,7 +66,7 @@ export default function Home() {
   const [status, setStatus] = useState<string>("");
   const [busy, setBusy] = useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
-  const [amountByMarket, setAmountByMarket] = useState<Record<number, string>>({ 0: "0.01", 1: "0.01" });
+  const [amountByMarket, setAmountByMarket] = useState<Record<number, string>>({ 0: "0.001", 1: "0.001" });
   const [sellSharesByMarket, setSellSharesByMarket] = useState<Record<number, string>>({ 0: "1", 1: "1" });
   const [markets, setMarkets] = useState<MarketView[]>([]);
   const [chadStatus, setChadStatus] = useState<string>("Inactive");
@@ -242,6 +242,17 @@ export default function Home() {
           throw new Error("Enter an amount in tBNB.");
         }
         const amount = parseEther(amountRaw);
+
+        const market = markets.find((entry) => entry.id === marketId);
+        if (!market) {
+          throw new Error("Market not loaded. Refresh and try again.");
+        }
+        if (amount >= market.noPool) {
+          throw new Error(
+            `Trade too large for current liquidity. Use less than ${formatEther(market.noPool)} tBNB or add liquidity.`
+          );
+        }
+
         tx = await contract.buyYes(marketId, { value: amount });
       } else if (action === "no") {
         const amountRaw = amountByMarket[marketId];
@@ -249,6 +260,17 @@ export default function Home() {
           throw new Error("Enter an amount in tBNB.");
         }
         const amount = parseEther(amountRaw);
+
+        const market = markets.find((entry) => entry.id === marketId);
+        if (!market) {
+          throw new Error("Market not loaded. Refresh and try again.");
+        }
+        if (amount >= market.yesPool) {
+          throw new Error(
+            `Trade too large for current liquidity. Use less than ${formatEther(market.yesPool)} tBNB or add liquidity.`
+          );
+        }
+
         tx = await contract.buyNo(marketId, { value: amount });
       } else if (action === "sellYes") {
         const shareCountRaw = sellSharesByMarket[marketId];
@@ -334,6 +356,15 @@ export default function Home() {
       }
 
       const tradeValue = parseEther(CHAD_TRADE_SIZE_TBNB);
+
+      const minPool = (left: bigint, right: bigint) => (left < right ? left : right);
+      const market0MinPool = minPool(market0[1], market0[2]);
+      const market1MinPool = minPool(market1[1], market1[2]);
+      if (tradeValue >= market0MinPool || tradeValue >= market1MinPool) {
+        setChadStatus("Active (Monitoring)");
+        setStatus("Chad is active but paused: not enough pool depth for the configured trade size.");
+        return;
+      }
 
       if (yes0 < yes1) {
         setChadStatus("Active (Trading)");
