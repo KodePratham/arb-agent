@@ -24,6 +24,7 @@ class Platform(str, enum.Enum):
     """Prediction-market platforms we ingest from."""
     PREDICTFUN = "PREDICTFUN"
     PROBABLE   = "PROBABLE"
+    OPINION_TRADE = "OPINION_TRADE"
 
 
 class ResolutionOracle(str, enum.Enum):
@@ -266,7 +267,7 @@ class SnapshotManifest(BaseModel):
         "", description="LLM model used for text extraction (e.g. llama3, mistral)"
     )
     platform: str = Field(
-        ..., description="Platform the data came from (PREDICTFUN or PROBABLE)"
+        ..., description="Platform the data came from (PREDICTFUN, PROBABLE, or OPINION_TRADE)"
     )
     market_count: int = Field(
         0, description="Number of markets in the companion JSON file"

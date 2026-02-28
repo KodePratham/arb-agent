@@ -32,7 +32,8 @@ Set at least:
 LLM_PROVIDER=ollama
 MODEL=
 OLLAMA_BASE_URL=http://localhost:11434
-PREDICTFUN_API_KEY=your_key_here
+PROBABLE_API_KEY=your_key_here
+OPINION_TRADE_API_KEY=your_key_here
 ```
 
 ## 2. Build C++ Engine
@@ -49,8 +50,8 @@ If you use MSVC, switch generator accordingly.
 ## 3. Ingest Markets
 
 ```powershell
-python -m Ingestion.ingest_predictfun
 python -m Ingestion.ingest_probable
+python -m Ingestion.ingest_opinion_trade
 ```
 
 Optional flags:

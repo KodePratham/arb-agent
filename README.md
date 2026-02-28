@@ -9,7 +9,7 @@ This repository ingests heterogeneous market data, normalizes it into a canonica
 ```text
                       +-----------------------------+
                       | Ingestion (Python)          |
-                      | Predict.fun / Probable      |
+                      | Probable / Opinion.trade    |
                       +-------------+---------------+
                                     |
                      LLM parse + canonical normalize
@@ -48,6 +48,14 @@ This repository ingests heterogeneous market data, normalizes it into a canonica
 5. The execution runner reads `arbs.json` and either:
    - prints a dry-run execution plan, or
    - submits transactions when `--execute` is enabled and execution inputs are configured.
+
+## API Use-case
+
+This repo exposes a single canonical data API surface (the normalized schema in `Data/schemas.py`) for multiple prediction markets.
+
+- Source SDKs: `Ingestion/sdk/probable.py` and `Ingestion/sdk/opinion_trade.py`
+- Unified output: `Data/markets/*.json` with one shared shape (`NormalizedMarket`)
+- Consumer simplicity: downstream components (engine, execution, analytics) read one schema, not per-platform payload formats
 
 ## C++ Execution Engine
 
@@ -160,8 +168,8 @@ docs/                  Build, API keys, troubleshooting guides
 
 ```powershell
 pip install -r requirements.txt
-python -m Ingestion.ingest_predictfun
 python -m Ingestion.ingest_probable
+python -m Ingestion.ingest_opinion_trade
 .\Engine\build\arb-engine.exe --output Engine\build\arbs.json
 python -m Execution.run_arb --arbs Engine\build\arbs.json
 ```

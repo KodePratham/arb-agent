@@ -38,12 +38,13 @@ struct Optional {
 
 // ── Enums ────────────────────────────────────────────────────────
 
-enum Platform { PLATFORM_PREDICTFUN = 0, PLATFORM_PROBABLE = 1 };
+enum Platform { PLATFORM_PREDICTFUN = 0, PLATFORM_PROBABLE = 1, PLATFORM_OPINION_TRADE = 2 };
 
 inline std::string platform_to_string(Platform p) {
     switch (p) {
         case PLATFORM_PREDICTFUN: return "PREDICTFUN";
         case PLATFORM_PROBABLE:   return "PROBABLE";
+        case PLATFORM_OPINION_TRADE: return "OPINION_TRADE";
     }
     return "UNKNOWN";
 }
@@ -51,6 +52,7 @@ inline std::string platform_to_string(Platform p) {
 inline Platform platform_from_string(const std::string& s) {
     if (s == "PREDICTFUN") return PLATFORM_PREDICTFUN;
     if (s == "PROBABLE")   return PLATFORM_PROBABLE;
+    if (s == "OPINION_TRADE") return PLATFORM_OPINION_TRADE;
     throw std::runtime_error("Unknown platform: " + s);
 }
 

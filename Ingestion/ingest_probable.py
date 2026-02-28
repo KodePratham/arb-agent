@@ -31,7 +31,6 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-import httpx
 from dotenv import load_dotenv
 
 # ── Ensure the project root is on sys.path ───────────────────────
@@ -54,6 +53,7 @@ from Data.schemas import (
     TradingStatus,
 )
 from Ingestion.base_parser import parse_market_text, set_model
+from Ingestion.sdk.probable import ProbableConfig, ProbableSDK
 
 load_dotenv()
 
@@ -65,7 +65,6 @@ logging.basicConfig(
 
 # ── Config ────────────────────────────────────────────────────────
 
-API_BASE: str = os.getenv("PROBABLE_API_BASE", "https://market-api.probable.markets")
 API_KEY: str = os.getenv("PROBABLE_API_KEY", "")  # required — Probable enforces auth even on read endpoints
 WS_URL: str = os.getenv("PROBABLE_WS_URL", "wss://probable.markets/ws")
 ZMQ_ADDR: str = os.getenv("ZMQ_ENGINE_ADDR", "tcp://0.0.0.0:5555")
@@ -73,80 +72,32 @@ DATA_DIR: Path = ROOT / "Data" / "markets"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 NODE_ID: str = uuid.uuid4().hex[:8]
+PROBABLE_SDK = ProbableSDK(
+    ProbableConfig(
+        base_url=os.getenv("PROBABLE_API_BASE", "https://market-api.probable.markets"),
+        api_key=API_KEY,
+        timeout_seconds=int(os.getenv("PROBABLE_API_TIMEOUT_SECONDS", "30")),
+    )
+)
 
 
 # ── REST helpers ──────────────────────────────────────────────────
 
-
-def _headers() -> dict[str, str]:
-    """Probable requires a Bearer token even for read endpoints."""
-    h: dict[str, str] = {"Accept": "application/json"}
-    if API_KEY:
-        h["Authorization"] = f"Bearer {API_KEY}"
-    else:
+def fetch_all_markets(max_markets: int | None = None) -> list[dict]:
+    """Fetch open markets through the Probable SDK client."""
+    if not API_KEY:
         log.warning(
             "PROBABLE_API_KEY is not set — requests will likely be rejected "
-            "with 401/403. Set it in your .env file: PROBABLE_API_KEY=<your_key>"
+            "with 401/403. Set PROBABLE_API_KEY in your .env file."
         )
-    return h
-
-
-def fetch_all_markets(max_markets: int | None = None) -> list[dict]:
-    """
-    Paginate through the Probable markets API.
-
-    NOTE: Probable's exact API shape may differ; adapt the endpoint
-    and pagination logic when their documentation is finalised.
-    """
-    markets: list[dict] = []
-    page = 1
-    page_size = 50
-
-    with httpx.Client(base_url=API_BASE, headers=_headers(), timeout=30) as client:
-        while True:
-            params: dict[str, str | int] = {
-                "page": page,
-                "limit": page_size,
-                "status": "open",
-            }
-            resp = client.get("/v1/markets", params=params)
-            if resp.status_code in (401, 403):
-                raise RuntimeError(
-                    f"Probable API returned {resp.status_code}: authentication required. "
-                    "Set PROBABLE_API_KEY=<your_key> in your .env file and re-run."
-                )
-            resp.raise_for_status()
-            body = resp.json()
-
-            data = body.get("data", body.get("markets", []))
-            if max_markets is not None:
-                remaining = max_markets - len(markets)
-                if remaining <= 0:
-                    break
-                markets.extend(data[:remaining])
-            else:
-                markets.extend(data)
-            log.info(
-                "Fetched page %d  (%d markets, total %d)",
-                page,
-                len(data),
-                len(markets),
-            )
-
-            if (max_markets is not None and len(markets) >= max_markets) or len(data) < page_size:
-                break
-            page += 1
-
+    markets = PROBABLE_SDK.list_open_markets(max_markets=max_markets)
+    log.info("Fetched %d markets from Probable SDK", len(markets))
     return markets
 
 
 def fetch_orderbook(market_id: str) -> dict | None:
-    """Fetch the order book for a single Probable market."""
-    with httpx.Client(base_url=API_BASE, headers=_headers(), timeout=15) as client:
-        resp = client.get(f"/v1/markets/{market_id}/orderbook")
-        if resp.status_code != 200:
-            return None
-        return resp.json().get("data", resp.json())
+    """Fetch the order book for a single Probable market via SDK."""
+    return PROBABLE_SDK.get_orderbook(market_id)
 
 
 # ── Normalisation ─────────────────────────────────────────────────

@@ -1,13 +1,23 @@
 # Troubleshooting
 
-## Predict.fun returns 401
+## Probable returns 401/403
 
-Cause: `PREDICTFUN_API_KEY` is missing or invalid.
+Cause: `PROBABLE_API_KEY` is missing or invalid.
 
 Fix:
 
-1. Set `PREDICTFUN_API_KEY` in `.env`
-2. Re-run `python -m Ingestion.ingest_predictfun`
+1. Set `PROBABLE_API_KEY` in `.env`
+2. Re-run `python -m Ingestion.ingest_probable`
+
+## Opinion.trade returns no markets
+
+Cause: endpoint path differs from defaults or API requires auth.
+
+Fix:
+
+1. Set `OPINION_TRADE_API_BASE` and/or `OPINION_TRADE_APP_BASE` in `.env`
+2. Set `OPINION_TRADE_API_KEY` if required by your endpoint
+3. Re-run `python -m Ingestion.ingest_opinion_trade`
 
 ## Ollama connection failure
 

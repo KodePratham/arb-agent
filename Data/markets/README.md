@@ -4,8 +4,8 @@ Local snapshot directory used by the C++ matcher.
 
 ## File patterns
 
-- `predictfun_YYYYMMDD_HHMMSS.json`
 - `probable_YYYYMMDD_HHMMSS.json`
+- `opinion_trade_YYYYMMDD_HHMMSS.json`
 - `*_meta.json` (ingestion metadata)
 
 ## Usage

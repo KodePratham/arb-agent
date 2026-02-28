@@ -6,14 +6,17 @@
 |---|---|
 | `LLM_PROVIDER` | Must be `ollama` |
 | `OLLAMA_BASE_URL` | Local Ollama endpoint (default `http://localhost:11434`) |
-| `PREDICTFUN_API_KEY` | Predict.fun ingestion authentication |
+| `PROBABLE_API_KEY` | Probable ingestion authentication |
+| `OPINION_TRADE_API_KEY` | Opinion.trade ingestion authentication (if required by endpoint) |
 
 ## Optional
 
 | Variable | Purpose |
 |---|---|
 | `MODEL` | Ollama model override; leave blank to pick interactively |
-| `PROBABLE_API_KEY` | Optional bearer token if Probable endpoint requires auth |
+| `PROBABLE_API_BASE` | Probable API base URL override |
+| `OPINION_TRADE_API_BASE` | Opinion.trade API base URL override |
+| `OPINION_TRADE_APP_BASE` | Opinion.trade app base fallback override |
 | `PRIVATE_KEY` | Required only for `Execution.run_arb --execute` |
 | `ARB_EXECUTOR_CONTRACT` | Required only for live contract calls |
 | `OPBNB_RPC_URL` | RPC endpoint override |
@@ -25,13 +28,13 @@ LLM_PROVIDER=ollama
 MODEL=
 OLLAMA_BASE_URL=http://localhost:11434
 
-PREDICTFUN_API_BASE=https://api.predict.fun
-PREDICTFUN_API_KEY=your_predictfun_key
-PREDICTFUN_WS_URL=wss://ws.predict.fun
-
 PROBABLE_API_BASE=https://market-api.probable.markets
-PROBABLE_API_KEY=
+PROBABLE_API_KEY=your_probable_key
 PROBABLE_WS_URL=wss://probable.markets/ws
+
+OPINION_TRADE_API_BASE=https://api.opinion.trade
+OPINION_TRADE_APP_BASE=https://app.opinion.trade
+OPINION_TRADE_API_KEY=
 
 ZMQ_ENGINE_ADDR=tcp://0.0.0.0:5555
 
