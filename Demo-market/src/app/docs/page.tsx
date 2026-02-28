@@ -28,6 +28,18 @@ export default function DocsPage() {
           >
             Admin
           </Link>
+          <Link
+            href="/smart-contracts"
+            className="rounded-xl border-2 border-zinc-950 bg-white px-4 py-2 text-sm font-bold transition hover:-translate-y-px"
+          >
+            Smart Contracts
+          </Link>
+          <Link
+            href="/six-months-plan"
+            className="rounded-xl border-2 border-zinc-950 bg-white px-4 py-2 text-sm font-bold transition hover:-translate-y-px"
+          >
+            Six Months Plan
+          </Link>
         </div>
       </section>
 
