@@ -84,6 +84,32 @@ export default function DocsPage() {
       </section>
 
       <section className="mt-5 rounded-3xl border-2 border-zinc-950 bg-white p-6 shadow-sm">
+        <h2 className="text-xl font-black">Why we use only this smart contract set</h2>
+        <ul className="mt-3 list-disc space-y-2 pl-5 text-sm font-medium">
+          <li>
+            <span className="font-black">Single-contract scope:</span> the demo uses only <code>BinaryPredictionAMM.sol</code> so all
+            core actions (create market, buy/sell, resolve, claim) are transparent in one place.
+          </li>
+          <li>
+            <span className="font-black">Lower integration risk:</span> fewer contract dependencies means fewer failure points during
+            hackathon deployment and wallet interaction testing.
+          </li>
+          <li>
+            <span className="font-black">Faster auditability:</span> judges and contributors can verify pricing and settlement rules without
+            tracing cross-contract call graphs.
+          </li>
+          <li>
+            <span className="font-black">MVP fit:</span> advanced modules (oracle adapters, upgrade proxies, LP share tokens) are intentionally
+            excluded because they are not required to validate arbitrage behavior in this demo.
+          </li>
+          <li>
+            <span className="font-black">Planned extensibility:</span> once core behavior is stable, additional contracts can be added behind
+            clear interfaces instead of shipping unnecessary complexity now.
+          </li>
+        </ul>
+      </section>
+
+      <section className="mt-5 rounded-3xl border-2 border-zinc-950 bg-white p-6 shadow-sm">
         <h2 className="text-xl font-black">Engine and repo references</h2>
         <ul className="mt-3 list-disc space-y-2 pl-5 text-sm font-medium">
           <li>
