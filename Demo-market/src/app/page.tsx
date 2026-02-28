@@ -27,10 +27,38 @@ type MarketView = {
   outcomeYes: boolean;
 };
 
+type TourStep = {
+  title: string;
+  description: string;
+};
+
 const REQUIRED_MARKETS = [0, 1];
 const CHAD_TRADE_SIZE_TBNB = "0.01";
 const SHARE_UNIT_TBNB = 0.005;
 const SHARE_UNIT_WEI = parseEther("0.005");
+
+const TOUR_STEPS: TourStep[] = [
+  {
+    title: "Connect Wallet",
+    description: "Use Connect MetaMask to link your wallet and switch to BNB Smart Chain Testnet.",
+  },
+  {
+    title: "Refresh Market State",
+    description: "Tap Refresh to load latest pools, prices, and your share balances from chain data.",
+  },
+  {
+    title: "Trade or Add Liquidity",
+    description: "Inside each market card, enter amount/share count, then use Buy/Sell/Add buttons to interact.",
+  },
+  {
+    title: "Activate Chad",
+    description: "When both markets are active, Activate Chad runs the arbitrage leg across the two markets.",
+  },
+  {
+    title: "Explore Demo API",
+    description: "Open Demo API to search mocked market data and request an API key from the Get API Key popup.",
+  },
+];
 
 const formatShortAddress = (address: string) => `${address.slice(0, 6)}...${address.slice(-4)}`;
 
@@ -46,6 +74,8 @@ export default function Home() {
   const [chadStatus, setChadStatus] = useState<string>("Inactive");
   const [spreadBps, setSpreadBps] = useState<number | null>(null);
   const [marketCount, setMarketCount] = useState<number>(0);
+  const [tourOpen, setTourOpen] = useState<boolean>(false);
+  const [tourStep, setTourStep] = useState<number>(0);
 
   const ready = useMemo(() => Boolean(CONTRACT_ADDRESS), []);
   const hasWallet = useMemo(() => (typeof window !== "undefined" ? Boolean(window.ethereum) : false), []);
@@ -363,6 +393,18 @@ export default function Home() {
             <Link href="/admin" className="rounded-xl border-2 border-zinc-950 bg-white px-4 py-2 text-sm font-bold transition hover:-translate-y-px">
               Admin
             </Link>
+            <Link href="/demo-api" className="rounded-xl border-2 border-zinc-950 bg-white px-4 py-2 text-sm font-bold transition hover:-translate-y-px">
+              Demo API
+            </Link>
+            <button
+              onClick={() => {
+                setTourStep(0);
+                setTourOpen(true);
+              }}
+              className="rounded-xl border-2 border-zinc-950 bg-white px-4 py-2 text-sm font-bold transition hover:-translate-y-px"
+            >
+              Guided Tour
+            </button>
             <button
               onClick={connectWallet}
               disabled={busy}
@@ -553,6 +595,53 @@ export default function Home() {
           );
         })}
       </section>
+
+      {tourOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/45 p-4">
+          <div className="w-full max-w-xl rounded-3xl border-2 border-zinc-950 bg-yellow-100 p-5 shadow-sm">
+            <p className="text-xs font-black uppercase tracking-wide">Step {tourStep + 1} / {TOUR_STEPS.length}</p>
+            <h2 className="mt-1 text-2xl font-black">{TOUR_STEPS[tourStep]?.title}</h2>
+            <p className="mt-3 text-sm font-medium">{TOUR_STEPS[tourStep]?.description}</p>
+            <div className="mt-5 flex flex-wrap justify-end gap-2">
+              <button
+                onClick={() => {
+                  setTourOpen(false);
+                  setTourStep(0);
+                }}
+                className="rounded-xl border-2 border-zinc-950 bg-white px-4 py-2 text-sm font-bold"
+              >
+                Close
+              </button>
+              {tourStep > 0 && (
+                <button
+                  onClick={() => setTourStep((prev) => prev - 1)}
+                  className="rounded-xl border-2 border-zinc-950 bg-white px-4 py-2 text-sm font-bold"
+                >
+                  Back
+                </button>
+              )}
+              {tourStep < TOUR_STEPS.length - 1 ? (
+                <button
+                  onClick={() => setTourStep((prev) => prev + 1)}
+                  className="rounded-xl border-2 border-zinc-950 bg-lime-300 px-4 py-2 text-sm font-black"
+                >
+                  Next
+                </button>
+              ) : (
+                <button
+                  onClick={() => {
+                    setTourOpen(false);
+                    setTourStep(0);
+                  }}
+                  className="rounded-xl border-2 border-zinc-950 bg-lime-300 px-4 py-2 text-sm font-black"
+                >
+                  Finish
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

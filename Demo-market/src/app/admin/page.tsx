@@ -45,9 +45,14 @@ export default function AdminPage() {
       <section className="rounded-3xl border-2 border-zinc-950 bg-yellow-100 p-5 shadow-sm">
         <div className="mb-4 flex items-center justify-between">
           <h1 className="text-2xl font-black">Admin Console</h1>
-          <Link href="/" className="rounded-xl border-2 border-zinc-950 bg-white px-3 py-2 text-sm font-bold">
-            Back
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <Link href="/" className="rounded-xl border-2 border-zinc-950 bg-white px-3 py-2 text-sm font-bold">
+              Back
+            </Link>
+            <Link href="/demo-api" className="rounded-xl border-2 border-zinc-950 bg-white px-3 py-2 text-sm font-bold">
+              Demo API
+            </Link>
+          </div>
         </div>
 
         <p className="mb-4 text-sm font-medium">Set one final result for both similar markets.</p>

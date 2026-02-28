@@ -17,6 +17,12 @@ export default function DocsPage() {
             Back to Market
           </Link>
           <Link
+            href="/demo-api"
+            className="rounded-xl border-2 border-zinc-950 bg-white px-4 py-2 text-sm font-bold transition hover:-translate-y-px"
+          >
+            Demo API
+          </Link>
+          <Link
             href="/admin"
             className="rounded-xl border-2 border-zinc-950 bg-white px-4 py-2 text-sm font-bold transition hover:-translate-y-px"
           >
