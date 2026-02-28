@@ -34,8 +34,6 @@ type TourStep = {
 
 const REQUIRED_MARKETS = [0, 1];
 const CHAD_TRADE_SIZE_TBNB = "0.01";
-const SHARE_UNIT_TBNB = 0.005;
-const SHARE_UNIT_WEI = parseEther("0.005");
 
 const TOUR_STEPS: TourStep[] = [
   {
@@ -47,8 +45,8 @@ const TOUR_STEPS: TourStep[] = [
     description: "Tap Refresh to load latest pools, prices, and your share balances from chain data.",
   },
   {
-    title: "Trade or Add Liquidity",
-    description: "Inside each market card, enter amount/share count, then use Buy/Sell/Add buttons to interact.",
+    title: "Trade Positions",
+    description: "Inside each market card, enter trade amount and share amount, then use Buy/Sell YES/NO actions.",
   },
   {
     title: "Activate Chad",
@@ -76,6 +74,7 @@ export default function Home() {
   const [marketCount, setMarketCount] = useState<number>(0);
   const [tourOpen, setTourOpen] = useState<boolean>(false);
   const [tourStep, setTourStep] = useState<number>(0);
+  const [similarMarketsPopupOpen, setSimilarMarketsPopupOpen] = useState<boolean>(true);
 
   const ready = useMemo(() => Boolean(CONTRACT_ADDRESS), []);
   const hasWallet = useMemo(() => (typeof window !== "undefined" ? Boolean(window.ethereum) : false), []);
@@ -226,7 +225,7 @@ export default function Home() {
     }
   };
 
-  const runTrade = async (marketId: number, action: "add" | "yes" | "no" | "sellYes" | "sellNo") => {
+  const runTrade = async (marketId: number, action: "yes" | "no" | "sellYes" | "sellNo") => {
     setBusy(true);
     setStatus("");
 
@@ -237,14 +236,7 @@ export default function Home() {
       const contract = new Contract(CONTRACT_ADDRESS, AMM_ABI, signer);
 
       let tx;
-      if (action === "add") {
-        const amountRaw = amountByMarket[marketId];
-        if (!amountRaw) {
-          throw new Error("Enter an amount in tBNB.");
-        }
-        const amount = parseEther(amountRaw);
-        tx = await contract.addLiquidity(marketId, { value: amount });
-      } else if (action === "yes") {
+      if (action === "yes") {
         const amountRaw = amountByMarket[marketId];
         if (!amountRaw) {
           throw new Error("Enter an amount in tBNB.");
@@ -263,19 +255,19 @@ export default function Home() {
         if (!shareCountRaw || Number(shareCountRaw) <= 0) {
           throw new Error("Enter share count to sell.");
         }
-        const sharesIn = parseEther((Number(shareCountRaw) * SHARE_UNIT_TBNB).toFixed(6));
+        const sharesIn = parseEther(shareCountRaw);
         tx = await contract.sellYes(marketId, sharesIn);
       } else {
         const shareCountRaw = sellSharesByMarket[marketId];
         if (!shareCountRaw || Number(shareCountRaw) <= 0) {
           throw new Error("Enter share count to sell.");
         }
-        const sharesIn = parseEther((Number(shareCountRaw) * SHARE_UNIT_TBNB).toFixed(6));
+        const sharesIn = parseEther(shareCountRaw);
         tx = await contract.sellNo(marketId, sharesIn);
       }
 
       await tx.wait();
-      setStatus(`Confirmed ${action.toUpperCase()} on market ${marketId + 1}.`);
+      setStatus(`Confirmed ${action.toUpperCase()} on market ${marketId + 1} (prediction-market style trading enabled).`);
       await loadMarkets();
     } catch (error) {
       setStatus((error as Error).message || "Transaction failed.");
@@ -442,7 +434,8 @@ export default function Home() {
         </div>
 
         <p className="mt-3 text-sm font-medium">Chad trade size: {CHAD_TRADE_SIZE_TBNB} tBNB per leg.</p>
-        <p className="mt-1 text-sm font-medium">Share unit: 1 share = {SHARE_UNIT_TBNB} tBNB notional.</p>
+        <p className="mt-1 text-sm font-medium">No manual liquidity action is required for normal trading flow.</p>
+        <p className="mt-1 text-sm font-medium">Shares are AMM-issued position tokens (effectively unbounded by a fixed per-user cap).</p>
         <p className="mt-1 text-sm font-medium">Detected markets onchain: {marketCount}</p>
         <p className="mt-1 text-sm font-medium">Arbitrage logic: Chad buys YES on the lower-priced market and hedges with NO on the higher-priced market.</p>
 
@@ -466,15 +459,15 @@ export default function Home() {
           const sellShareCount = sellSharesByMarket[market.id] || "";
           const yesPercent = Number(market.yesPriceBps) / 100;
           const noPercent = 100 - yesPercent;
-          const userYesShareCount = Number(market.userYesShares) / Number(SHARE_UNIT_WEI);
-          const userNoShareCount = Number(market.userNoShares) / Number(SHARE_UNIT_WEI);
+          const userYesShareCount = formatEther(market.userYesShares);
+          const userNoShareCount = formatEther(market.userNoShares);
 
           return (
             <article key={market.id} className="rounded-3xl border-2 border-zinc-950 bg-white p-5 shadow-sm">
               <div className="mb-3 flex items-start justify-between gap-3">
                 <div>
                   <h2 className="text-xl font-black">Market {market.id + 1}</h2>
-                  <p className="mt-1 text-sm font-medium">{market.question}</p>
+                  <p className="mt-1 rounded-xl border-2 border-zinc-950 bg-yellow-100 px-3 py-2 text-sm font-black">{market.question}</p>
                 </div>
                 <span
                   className={`rounded-lg border px-2 py-1 text-xs font-black ${
@@ -496,18 +489,18 @@ export default function Home() {
                   YES: {yesPercent.toFixed(2)}% | NO: {noPercent.toFixed(2)}%
                 </p>
 
-                <div className="rounded-lg border border-zinc-950/30 bg-zinc-50 p-3">
+                <div className="rounded-xl border-2 border-zinc-950 bg-yellow-100 p-3">
                   <div className="mb-2 flex justify-between text-xs font-bold">
                     <span>YES {yesPercent.toFixed(2)}%</span>
                     <span>NO {noPercent.toFixed(2)}%</span>
                   </div>
-                  <div className="h-3 w-full overflow-hidden rounded-full border border-zinc-950/30 bg-white">
+                  <div className="h-4 w-full overflow-hidden rounded-full border-2 border-zinc-950 bg-white">
                     <div className="h-full bg-fuchsia-300" style={{ width: `${yesPercent}%` }} />
                   </div>
                 </div>
 
-                <p className="rounded-lg border border-zinc-950/30 bg-zinc-50 px-3 py-2">Your YES shares: {userYesShareCount.toFixed(4)}</p>
-                <p className="rounded-lg border border-zinc-950/30 bg-zinc-50 px-3 py-2">Your NO shares: {userNoShareCount.toFixed(4)}</p>
+                <p className="rounded-lg border border-zinc-950/30 bg-zinc-50 px-3 py-2">Your YES shares: {Number(userYesShareCount).toFixed(4)}</p>
+                <p className="rounded-lg border border-zinc-950/30 bg-zinc-50 px-3 py-2">Your NO shares: {Number(userNoShareCount).toFixed(4)}</p>
                 {market.resolved && (
                   <p className="rounded-lg border border-zinc-950/30 bg-zinc-50 px-3 py-2">
                     Final result: {market.outcomeYes ? "YES won" : "NO won"}
@@ -541,17 +534,10 @@ export default function Home() {
                     [market.id]: event.target.value,
                   }))
                 }
-                placeholder="Shares to sell (count)"
+                placeholder="Shares to sell (exact share amount, e.g. 1.5)"
               />
 
-              <div className="mt-3 grid grid-cols-5 gap-2">
-                <button
-                  onClick={() => runTrade(market.id, "add")}
-                  disabled={busy || !ready || !market.active || !account}
-                  className="rounded-xl border-2 border-zinc-950 bg-white px-2 py-2 text-xs font-black transition hover:-translate-y-px disabled:opacity-50"
-                >
-                  Add
-                </button>
+              <div className="mt-3 grid grid-cols-4 gap-2">
                 <button
                   onClick={() => runTrade(market.id, "yes")}
                   disabled={busy || !ready || !market.active || !account}
@@ -595,6 +581,29 @@ export default function Home() {
           );
         })}
       </section>
+
+      {similarMarketsPopupOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/45 p-4">
+          <div className="w-full max-w-xl rounded-3xl border-2 border-zinc-950 bg-yellow-100 p-5 shadow-sm">
+            <h2 className="text-2xl font-black">Two Similar Markets Notice</h2>
+            <p className="mt-3 text-sm font-medium">
+              These are two similar markets that intentionally share the same final resolution outcome.
+              Chad monitors price divergence between them and executes hedged YES/NO arbitrage when spread appears.
+            </p>
+            <p className="mt-2 text-sm font-medium">
+              Trading flow is designed to feel like existing prediction markets: direct BUY/SELL position actions without requiring user liquidity provisioning.
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                onClick={() => setSimilarMarketsPopupOpen(false)}
+                className="rounded-xl border-2 border-zinc-950 bg-lime-300 px-4 py-2 text-sm font-black"
+              >
+                Continue
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {tourOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/45 p-4">

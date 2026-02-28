@@ -53,6 +53,8 @@ This repository ingests heterogeneous market data, normalizes it into a canonica
 
 This repo exposes a single canonical data API surface (the normalized schema in `Data/schemas.py`) for multiple prediction markets.
 
+For the BNB Ecosystem, this project acts as an ultimate API-key gateway layer: one integration path to access normalized market data across the 3 listed prediction markets (`predict.fun`, `opinion.trade`, and `probable.markets`) instead of maintaining separate per-platform integrations.
+
 - Source SDKs: `Ingestion/sdk/probable.py` and `Ingestion/sdk/opinion_trade.py`
 - Unified output: `Data/markets/*.json` with one shared shape (`NormalizedMarket`)
 - Consumer simplicity: downstream components (engine, execution, analytics) read one schema, not per-platform payload formats
@@ -123,6 +125,12 @@ Note: live submission is scaffolded and requires exchange order construction + s
 ## Demo Market
 
 `Demo-market/` is an end-to-end demo environment to validate market mechanics and arbitrage behavior independently of external API instability.
+
+### BNB Ecosystem impact
+
+- Helps BNB builders ship faster by reducing integration friction across fragmented prediction market APIs.
+- Provides an ultimate API-key style access point for the 3 listed markets (`predict.fun`, `opinion.trade`, `probable.markets`) through one normalized schema and workflow.
+- Improves reliability for hackathon and MVP teams by supporting mock-data fallback when live parsing is constrained.
 
 ### What it includes
 
