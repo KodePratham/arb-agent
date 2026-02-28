@@ -1,131 +1,72 @@
 # arb-agent
 
-Fast, modular arbitrage stack for prediction markets across platforms like Predict.fun and Probable.
+Open-source arbitrage infrastructure for prediction markets.
 
-## Why this project exists
+This repo combines resilient data ingestion, LLM-assisted normalization, and a low-latency C++ matcher to detect cross-platform pricing inefficiencies and route opportunities to execution.
 
-Prediction market payloads are effectively **unregulated at the data-shape level**: field names, market wording, resolution rules, and metadata quality vary across sources and often drift over time.
+## TL;DR
 
-That inconsistency breaks strict parsers and creates bad matches. This project uses **LLM-assisted parsing + normalization** to convert messy upstream payloads into a single internal schema that the C++ matcher can safely consume.
+- **Problem:** real-world market APIs are inconsistent, under-documented, and prone to schema drift.
+- **Approach:** normalize messy payloads into one canonical schema using local LLM parsing.
+- **Core edge:** keep matching/scoring hot in C++ memory for speed.
+- **Outcome:** a practical arbitrage pipeline from ingestion to execution.
 
-## Core pipeline
+## Why this matters
 
-1. Ingest raw markets from multiple APIs.
-2. Use local Ollama models to parse and normalize inconsistent text/metadata.
-3. Persist normalized snapshots.
-4. Run low-latency C++ matching/scoring in memory.
-5. Export opportunities and optionally execute on-chain.
+Prediction market arbitrage is not blocked by one hard algorithm — it is blocked by data quality.
 
-## Flow diagrams
+Different platforms describe similar outcomes in different formats, with inconsistent field names, ambiguous market wording, and irregular metadata. This project is designed to survive that reality:
 
-### Data normalization and matching flow
+1. absorb heterogeneous payloads,
+2. normalize semantics,
+3. match equivalent outcomes quickly,
+4. emit executable opportunities.
 
-```text
-+------------------+          +------------------+
-|  Predict.fun API |          |   Probable API   |
-+------------------+          +------------------+
-	    \                          /
-	     \                        /
-		v                      v
-		    +----------------+
-		    | Ingestion Layer|
-		    +----------------+
-				 |
-				 v
-		    +----------------+
-		    |  LLM Parsing   |
-		    |    (Ollama)    |
-		    +----------------+
-				 |
-				 v
-		+---------------------------+
-		| Canonical Schema          |
-		| (Data/schemas.py)         |
-		+---------------------------+
-				 |
-				 v
-		+---------------------------+
-		| Snapshot Store            |
-		| (Data/markets)            |
-		+---------------------------+
-				 |
-				 v
-		+---------------------------+
-		| C++ Engine                |
-		| matcher + scorer          |
-		+---------------------------+
-				 |
-				 v
-			 +-----------+
-			 | arbs.json |
-			 +-----------+
-				 |
-				 v
-		   +--------------------+
-		   |  Execution Runner  |
-		   +--------------------+
-```
+## Why we built the Demo Market
 
-### Lifecycle flow
+During the hackathon, external API coverage and stable parsing signals were limited. Instead of waiting for ideal upstream data, we built **`Demo-market/`** to validate the core mechanics end-to-end:
+
+- AMM pricing behavior
+- spread divergence and convergence
+- arbitrage loop logic
+- on-chain settlement flow
+
+The demo lets judges and contributors test the engine ideas immediately while we continue hardening real-world ingestion quality.
+
+## Architecture
 
 ```text
-+--------------------+
-| Fetch Market Data  |
-+--------------------+
-	    |
-	    v
-+--------------------+
-| Parse + Normalize  |
-+--------------------+
-	    |
-	    v
-+-------------------------+
-| Validate + Deduplicate  |
-+-------------------------+
-	    |
-	    v
-+-------------------------+
-| Cross-Platform Match    |
-+-------------------------+
-	    |
-	    v
-+-------------------------+
-| Risk / Spread Scoring   |
-+-------------------------+
-	    |
-	    v
-+-------------------------+
-| Opportunity Output      |
-+-------------------------+
-	    |
-	    v
-     +------------+
-     | Execute ?  |
-     +------------+
-	 /        \
-	/          \
-     v            v
-+-------------------+   +----------------------+
-| Dry-run Review    |   | On-chain Submission  |
-+-------------------+   +----------------------+
+Predict.fun / Probable / Other Sources
+                |
+                v
+        Ingestion Adapters (Python)
+                |
+                v
+      LLM Parse + Canonical Normalize
+                |
+                v
+      Data/schemas.py + snapshots (JSON)
+                |
+                v
+      C++ Matching + Spread Scoring
+                |
+                v
+         opportunities (arbs.json)
+                |
+                v
+      Execution Runner / On-chain path
 ```
 
-## Tech stack
+## Repository map
 
-- Python ingestion and orchestration
-- Ollama for local LLM parsing
-- C++14 matching engine for low-latency scanning
-- Optional Solidity/Hardhat execution contract path
-
-## Repository layout
-
-- `Ingestion/` - source adapters + parsing pipeline
-- `Data/schemas.py` - normalized data contracts
-- `Data/markets/` - generated normalized snapshots
-- `Engine/` - C++ matcher/scorer and build system
-- `Execution/` - dry-run/live opportunity executor
-- `Contracts/` - `ArbExecutor.sol` and deployment tooling
-- `docs/` - setup, build, troubleshooting, API key notes
+- `Ingestion/` — platform adapters and parser orchestration
+- `Data/schemas.py` — canonical schema contracts
+- `Data/markets/` — normalized snapshots consumed by engine
+- `Engine/` — C++ matcher/scorer (`cmake` build)
+- `Execution/` — dry-run/live execution entrypoint
+- `Contracts/` — optional Solidity executor + deployment scripts
+- `Demo-market/` — UX + on-chain simulation of market + arb behavior
+- `docs/` — setup, API key, build, and troubleshooting guides
 
 ## Quick start
 
@@ -133,17 +74,17 @@ That inconsistency breaks strict parsers and creates bad matches. This project u
 
 - Python 3.11+
 - CMake 3.5+
-- C++ compiler (MinGW/GCC/MSVC)
-- Ollama running locally at `http://localhost:11434`
-- Node.js 18+ (only for contract deployment)
+- C++ compiler (MSVC/MinGW/GCC/Clang)
+- Ollama running locally (`http://localhost:11434`)
+- Node.js 18+ (optional, contract/deploy paths)
 
-### 2) Install
+### 2) Install dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 3) Configure env
+### 3) Configure environment
 
 Create `.env` and set at minimum:
 
@@ -154,14 +95,14 @@ OLLAMA_BASE_URL=http://localhost:11434
 PREDICTFUN_API_KEY=your_key_here
 ```
 
-### 4) Ingest
+### 4) Run ingestion
 
 ```bash
 python -m Ingestion.ingest_predictfun
 python -m Ingestion.ingest_probable
 ```
 
-### 5) Build + run engine
+### 5) Build and run engine
 
 ```bash
 cd Engine
@@ -171,25 +112,38 @@ cmake --build build
 ./build/arb-engine --output arbs.json       # Linux/macOS
 ```
 
-### 6) Review or execute
+### 6) Review or execute opportunities
 
 ```bash
 python -m Execution.run_arb --arbs Engine/build/arbs.json
 python -m Execution.run_arb --arbs Engine/build/arbs.json --execute
 ```
 
-## Notes
+## Open-source goals
 
-- ZMQ is optional; snapshot mode works without it.
-- Generated snapshots/build outputs are not tracked by git.
-- Live execution is opt-in via `--execute`.
+We want this to be a reference stack for market-neutral prediction market infra.
 
-## Docs
+Near-term contribution areas:
+
+- new source adapters and schema mappers
+- stronger semantic market equivalence scoring
+- risk model calibration and execution safeguards
+- benchmarking datasets and reproducible evals
+
+## Engineering principles
+
+- **Schema first:** all downstream systems rely on a strict canonical contract.
+- **Deterministic core:** scoring and matching remain deterministic and explainable.
+- **Local-first parsing:** LLM parsing can run with local Ollama models.
+- **Execution safety:** live mode is explicit and opt-in.
+
+## Additional docs
 
 - `SETUP_AND_RUN.md`
 - `docs/BUILD_ENGINE.md`
 - `docs/API_KEYS.md`
 - `docs/TROUBLESHOOTING.md`
+- `Demo-market/README.md`
 
 ## License
 
