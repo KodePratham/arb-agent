@@ -8,6 +8,12 @@ Simple prediction market dashboard with:
 - `Activate Chad` arbitrage agent button
 - Hardhat deployment flow for BSC testnet
 
+## Hackathon note (mock data + Ollama constraints)
+
+- For hackathon purposes, we are using mock market data in the demo flows.
+- Reason: end-to-end parsing against live external feeds could not be reliably completed within hackathon constraints due to Ollama runtime limitations in our environment.
+- Ollama parsing is only required once to produce the normalized canonical snapshot; after that, the matcher and UI can run repeatedly on the generated snapshot/mock dataset.
+
 ## Stack
 
 - Next.js (App Router, TypeScript)
@@ -76,6 +82,8 @@ The UI now shows explicit ACTIVE/INACTIVE states for:
 - Users can sell YES/NO shares before market resolution.
 - Share display is normalized: 1 share = 0.005 tBNB notional at launch.
 - Arbitrage bot behavior: buy YES on the lower-priced market and hedge with NO on the higher-priced market.
+- Hackathon demo uses mock data where needed because live parsing was constrained by Ollama environment limits during build time.
+- Ollama parsing is a one-time preprocessing step, not required for each subsequent UI or matching run.
 - Questions are:
 	- Will humans land on mars by 2030
 	- Successful Human Mars mission by 2030?
