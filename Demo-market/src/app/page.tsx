@@ -70,6 +70,7 @@ export default function Home() {
   const [sellSharesByMarket, setSellSharesByMarket] = useState<Record<number, string>>({ 0: "1", 1: "1" });
   const [markets, setMarkets] = useState<MarketView[]>([]);
   const [chadStatus, setChadStatus] = useState<string>("Inactive");
+  const [chadReport, setChadReport] = useState<string[]>([]);
   const [spreadBps, setSpreadBps] = useState<number | null>(null);
   const [marketCount, setMarketCount] = useState<number>(0);
   const [tourOpen, setTourOpen] = useState<boolean>(false);
@@ -324,8 +325,10 @@ export default function Home() {
   };
 
   const activateChad = async () => {
+    const reportLines: string[] = [];
     setBusy(true);
     setStatus("");
+    setChadReport([]);
 
     try {
       if (!ready) {
@@ -346,46 +349,67 @@ export default function Home() {
       const [market0, market1] = await Promise.all([contract.getMarket(0), contract.getMarket(1)]);
       const yes0 = Number(market0[3]);
       const yes1 = Number(market1[3]);
+      reportLines.push(`Evaluated market 1 YES price: ${(yes0 / 100).toFixed(2)}%.`);
+      reportLines.push(`Evaluated market 2 YES price: ${(yes1 / 100).toFixed(2)}%.`);
       const currentSpread = Math.abs(yes0 - yes1);
       setSpreadBps(currentSpread);
+      reportLines.push(`Observed spread: ${(currentSpread / 100).toFixed(2)}%.`);
 
       if (currentSpread < 50) {
         setChadStatus("Active (Monitoring)");
+        reportLines.push("Decision: no trade. Spread is below 0.50% threshold.");
+        setChadReport(reportLines);
         setStatus("Chad is active and monitoring. Spread already tight.");
         return;
       }
 
       const tradeValue = parseEther(CHAD_TRADE_SIZE_TBNB);
+      reportLines.push(`Configured trade size per leg: ${CHAD_TRADE_SIZE_TBNB} tBNB.`);
 
       const minPool = (left: bigint, right: bigint) => (left < right ? left : right);
       const market0MinPool = minPool(market0[1], market0[2]);
       const market1MinPool = minPool(market1[1], market1[2]);
+      reportLines.push(`Market 1 min pool depth: ${formatEther(market0MinPool)} tBNB.`);
+      reportLines.push(`Market 2 min pool depth: ${formatEther(market1MinPool)} tBNB.`);
       if (tradeValue >= market0MinPool || tradeValue >= market1MinPool) {
         setChadStatus("Active (Monitoring)");
+        reportLines.push("Decision: no trade. One or both markets do not have enough depth for configured size.");
+        setChadReport(reportLines);
         setStatus("Chad is active but paused: not enough pool depth for the configured trade size.");
         return;
       }
 
       if (yes0 < yes1) {
         setChadStatus("Active (Trading)");
+        reportLines.push("Decision: market 1 YES is cheaper, so buy YES on market 1 and hedge with NO on market 2.");
         const tx1 = await contract.buyYes(0, { value: tradeValue });
         await tx1.wait();
+        reportLines.push(`Executed leg 1: buyYes(0), tx ${tx1.hash}.`);
         const tx2 = await contract.buyNo(1, { value: tradeValue });
         await tx2.wait();
+        reportLines.push(`Executed leg 2: buyNo(1), tx ${tx2.hash}.`);
       } else {
         setChadStatus("Active (Trading)");
+        reportLines.push("Decision: market 2 YES is cheaper, so buy YES on market 2 and hedge with NO on market 1.");
         const tx1 = await contract.buyYes(1, { value: tradeValue });
         await tx1.wait();
+        reportLines.push(`Executed leg 1: buyYes(1), tx ${tx1.hash}.`);
         const tx2 = await contract.buyNo(0, { value: tradeValue });
         await tx2.wait();
+        reportLines.push(`Executed leg 2: buyNo(0), tx ${tx2.hash}.`);
       }
 
       await loadMarkets();
       setChadStatus("Active");
+      reportLines.push("Result: arbitrage legs completed and market data refreshed.");
+      setChadReport(reportLines);
       setStatus("Chad arbitrage completed successfully.");
     } catch (error) {
       setChadStatus("Failed");
-      setStatus((error as Error).message || "Activate Chad failed.");
+      const failureMessage = (error as Error).message || "Activate Chad failed.";
+      reportLines.push(`Result: failed. ${failureMessage}`);
+      setChadReport(reportLines);
+      setStatus(failureMessage);
     } finally {
       setBusy(false);
     }
@@ -475,6 +499,17 @@ export default function Home() {
         <p className="mt-1 text-sm font-medium">Shares are AMM-issued position tokens (effectively unbounded by a fixed per-user cap).</p>
         <p className="mt-1 text-sm font-medium">Detected markets onchain: {marketCount}</p>
         <p className="mt-1 text-sm font-medium">Arbitrage logic: Chad buys YES on the lower-priced market and hedges with NO on the higher-priced market.</p>
+
+        {chadReport.length > 0 && (
+          <div className="mt-3 rounded-xl border-2 border-zinc-950 bg-white p-3">
+            <p className="text-sm font-black">Chad Report</p>
+            <ul className="mt-2 list-disc space-y-1 pl-5 text-sm font-medium">
+              {chadReport.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {!hasWallet && <p className="mt-2 text-sm font-semibold">Showing markets in read-only mode. Install MetaMask to trade.</p>}
         {!ready && (
