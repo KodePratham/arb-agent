@@ -52,6 +52,12 @@ export default function AdminPage() {
             <Link href="/demo-api" className="rounded-xl border-2 border-zinc-950 bg-white px-3 py-2 text-sm font-bold">
               Demo API
             </Link>
+            <Link href="/smart-contracts" className="rounded-xl border-2 border-zinc-950 bg-white px-3 py-2 text-sm font-bold">
+              Smart Contracts
+            </Link>
+            <Link href="/six-months-plan" className="rounded-xl border-2 border-zinc-950 bg-white px-3 py-2 text-sm font-bold">
+              Six Months Plan
+            </Link>
           </div>
         </div>
 

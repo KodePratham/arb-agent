@@ -11,7 +11,7 @@ async function main() {
     process.env.OPBNB_TESTNET_RPC_URL ||
     "https://data-seed-prebsc-1-s1.bnbchain.org:8545";
   const privateKey = process.env.DEPLOYER_PRIVATE_KEY;
-  const seedTbnb = process.env.DEPLOY_SEED_TBNB || "0.005";
+  const seedTbnb = process.env.DEPLOY_SEED_TBNB || "0.01";
 
   if (!privateKey) {
     throw new Error("Set DEPLOYER_PRIVATE_KEY in .env before deployment.");
@@ -35,6 +35,9 @@ async function main() {
   console.log("BinaryPredictionAMM deployed at:", address);
 
   const seed = parseEther(seedTbnb);
+  if (seed <= 0n) {
+    throw new Error("DEPLOY_SEED_TBNB must be greater than 0 to keep both markets active.");
+  }
 
   const tx1 = await market.createMarket(
     "Will humans land on mars by 2030",
@@ -55,9 +58,14 @@ async function main() {
     throw new Error(`Expected 2 markets after deployment, got ${count}`);
   }
 
-  const [m0, m1] = await Promise.all([market.getMarket(0), market.getMarket(1)]);
-  const market0Active = m0[0].length > 0 && m0[1] > 0n && m0[2] > 0n;
-  const market1Active = m1[0].length > 0 && m1[1] > 0n && m1[2] > 0n;
+  const [m0, m1, s0, s1] = await Promise.all([
+    market.getMarket(0),
+    market.getMarket(1),
+    market.getMarketStatus(0),
+    market.getMarketStatus(1),
+  ]);
+  const market0Active = m0[0].length > 0 && m0[1] > 0n && m0[2] > 0n && !s0[0];
+  const market1Active = m1[0].length > 0 && m1[1] > 0n && m1[2] > 0n && !s1[0];
 
   if (!market0Active || !market1Active) {
     throw new Error("Market deployment finished but one or both markets are not active.");
@@ -73,7 +81,7 @@ async function main() {
   }
   writeFileSync(envLocalPath, `${withoutAddress.join("\n")}\n`);
 
-  console.log(`Created and verified market 0 + market 1 with active seed liquidity (${seedTbnb} tBNB each).`);
+  console.log(`Created and verified market 0 + market 1 with active unresolved state (${seedTbnb} tBNB each).`);
   console.log("Updated .env.local with NEXT_PUBLIC_CONTRACT_ADDRESS.");
 }
 

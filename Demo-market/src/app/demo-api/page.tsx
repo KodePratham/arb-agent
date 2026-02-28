@@ -78,6 +78,12 @@ export default function DemoApiPage() {
             <Link href="/" className="rounded-xl border-2 border-zinc-950 bg-white px-4 py-2 text-sm font-bold transition hover:-translate-y-px">
               Back to Market
             </Link>
+            <Link href="/smart-contracts" className="rounded-xl border-2 border-zinc-950 bg-white px-4 py-2 text-sm font-bold transition hover:-translate-y-px">
+              Smart Contracts
+            </Link>
+            <Link href="/six-months-plan" className="rounded-xl border-2 border-zinc-950 bg-white px-4 py-2 text-sm font-bold transition hover:-translate-y-px">
+              Six Months Plan
+            </Link>
             <button
               onClick={() => setApiKeyPopupOpen(true)}
               className="rounded-xl border-2 border-zinc-950 bg-lime-300 px-4 py-2 text-sm font-black transition hover:-translate-y-px"
